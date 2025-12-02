@@ -1,5 +1,6 @@
 # reproduce Miles-Rebholz discretization about NS alpha model
 from firedrake import *
+import csv
 
 def helicity_u(u):
     return assemble(inner(u, curl(u))*dx)
@@ -58,7 +59,7 @@ z_prev = Function(Z)
 (up, pp, u_bp, lmbdap, wp, gammap) = split(z_prev)
 
 # initial condition
-nu = Constant(0.001)
+nu = Constant(0)
 alpha = CellDiameter(mesh)
 
 a = Constant(1.25)  
@@ -110,10 +111,10 @@ F = (
 )
 
 bcs = [
- DirichletBC(Z.sub(0), u_init, "on_boundary"),
- DirichletBC(Z.sub(1), p_init, "on_boundary"),
-    DirichletBC(Z.sub(2), 0, "on_boundary"),
-    DirichletBC(Z.sub(4), w_init, "on_boundary"),
+    DirichletBC(Z.sub(0), u_init, "on_boundary"),
+    DirichletBC(Z.sub(1), p_init, "on_boundary"),
+#    DirichletBC(Z.sub(2), 0, "on_boundary"),
+#DirichletBC(Z.sub(4), w_init, "on_boundary"),
 ]
 
 (u_, p_, u_b_, lmbda_, w_, gamma_) = z.subfunctions
@@ -131,6 +132,29 @@ pb = NonlinearVariationalProblem(F, z, bcs)
 solver = NonlinearVariationalSolver(pb, solver_parameters = sp)
 
 timestep = 0
+data_filename = "output/data.csv"
+fieldnames = ["t", "divu", "energy", "helicity"]
+
+if mesh.comm.rank == 0:
+    with open(data_filename, "w", newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+
+energy = energy_u(z.sub(0))
+helicity = helicity_u(z.sub(0))
+divu = div_u(z.sub(0))
+
+if mesh.comm.rank == 0:
+    row = {
+        "t": float(t),
+        "divu": float(divu),
+        "energy": float(energy),
+        "helicity": float(helicity),
+    }
+    with open(data_filename, "a", newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writerow(row)
+
 while (float(t) < float(T-dt)+1.0e-10):
     t.assign(t+dt)
     if mesh.comm.rank == 0:
@@ -140,8 +164,19 @@ while (float(t) < float(T-dt)+1.0e-10):
     energy = energy_u(z.sub(0))
     helicity = helicity_u(z.sub(0))
     divu = div_u(z.sub(0))
-    print(RED % f"Solved at t = {float(t):.4f}, divu = {divu}, helicity = {helicity}, energy = {energy}", flush=True)
-    
+
+    if mesh.comm.rank == 0:
+        row = {
+            "t": float(t),
+            "divu": float(divu),
+            "energy": float(energy),
+            "helicity": float(helicity),
+        }
+        with open(data_filename, "a", newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writerow(row)
+
+    print(row) 
     pvd.write(*z.subfunctions, time=float(t))
     timestep += 1
 
