@@ -2,8 +2,8 @@
 from firedrake import *
 import csv
 
-nu = Constant(1)
-eta = Constant(1)
+nu = Constant(1e-4)
+eta = Constant(1e-4)
 S = Constant(1)
 
 def helicity_c(u, B):
@@ -31,7 +31,7 @@ sp = lu
 
 # spatial parameters
 dp={"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
-baseN = 3
+baseN = 4
 nref = 0
 
 mesh = PeriodicUnitCubeMesh(baseN, baseN, baseN, distribution_parameters=dp)
@@ -40,7 +40,7 @@ x, y, z0 = SpatialCoordinate(mesh)
 
 # spatial discretization
 Vg = VectorFunctionSpace(mesh, "CG", 2)
-Q = FunctionSpace(mesh, "CG", 1)
+Q = FunctionSpace(mesh, "DG", 0)
 
 # time 
 t = Constant(0) 
@@ -128,8 +128,11 @@ u_b_.rename("filteredVelocity")
 lmbda_.rename("LM2")
 
 pvd = VTKFile("output/mhd-alpha.pvd")
+pvd2 = VTKFile("output/current.pvd")
 pvd.write(*z.subfunctions, time = float(t))
-
+j = Function(Vg, name="Current")
+j.interpolate(curl(z.sub(4)))
+pvd2.write(j, time=float(t))
 pb = NonlinearVariationalProblem(F, z, bcs)
 solver = NonlinearVariationalSolver(pb, solver_parameters = sp)
 
@@ -184,6 +187,10 @@ while (float(t) < float(T-dt)+1.0e-10):
 
     print(row) 
     pvd.write(*z.subfunctions, time=float(t))
+    j = Function(Vg, name="Current")
+    j.interpolate(curl(z.sub(4)))
+    pvd2.write(j, time=float(t))
+
     timestep += 1
     z_prev.assign(z)
 
