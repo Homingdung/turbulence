@@ -76,23 +76,24 @@ term2 = 2 * sin(a*y+d*z0) * cos(a*x+d*y) * exp(a*(z0+x)) * 2 * sin(a*z0+d*x) * c
 
 p_init = -a**2/2 * (term1 + term2) * damping
 u_init = as_vector([u1_expr, u2_expr, u3_expr])
-w_init = curl(u_init)
+#w_init = curl(u_init)
 
 z_prev.sub(0).interpolate(u_init)
 z_prev.sub(1).interpolate(p_init)
-z_prev.sub(4).interpolate(w_init)
+#z_prev.sub(4).interpolate(w_init)
 
 z.assign(z_prev)
 
 u_avg = (u + up)/2
 u_b_avg = (u_b + u_bp)/2
 w_avg = (w + wp)/2
+p_avg = (p + pp)/2
 
 F = (
     # u
     inner((u - up)/dt, ut) * dx
     -inner(cross(u_b_avg, w_avg), ut) * dx
-    - inner(p, div(ut)) * dx
+    - inner(p_avg, div(ut)) * dx
     + nu * inner(grad(u_avg), grad(ut)) * dx
     # p
     - inner(div(u), pt) * dx
@@ -110,12 +111,8 @@ F = (
     + inner(div(w), gammat) * dx
 )
 
-bcs = [
-    DirichletBC(Z.sub(0), u_init, "on_boundary"),
-    DirichletBC(Z.sub(1), p_init, "on_boundary"),
-#    DirichletBC(Z.sub(2), 0, "on_boundary"),
-#DirichletBC(Z.sub(4), w_init, "on_boundary"),
-]
+dirichlet_ids = ("on_boundary",)
+bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids]
 
 (u_, p_, u_b_, lmbda_, w_, gamma_) = z.subfunctions
 u_.rename("Velocity")
@@ -125,13 +122,12 @@ lmbda_.rename("LM1")
 w_.rename("Vorticity")
 gamma_.rename("LM2")
 
-pvd = VTKFile("output/ns-alpha.pvd")
+pvd = VTKFile("output/3dns-alpha.pvd")
 pvd.write(*z.subfunctions, time = float(t))
 
 pb = NonlinearVariationalProblem(F, z, bcs)
 solver = NonlinearVariationalSolver(pb, solver_parameters = sp)
 
-timestep = 0
 data_filename = "output/data.csv"
 fieldnames = ["t", "divu", "energy", "helicity"]
 
@@ -155,6 +151,7 @@ if mesh.comm.rank == 0:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writerow(row)
 
+timestep = 0
 while (float(t) < float(T-dt)+1.0e-10):
     t.assign(t+dt)
     if mesh.comm.rank == 0:
@@ -179,4 +176,5 @@ while (float(t) < float(T-dt)+1.0e-10):
     print(row) 
     pvd.write(*z.subfunctions, time=float(t))
     timestep += 1
+    z_prev.assign(z)
 

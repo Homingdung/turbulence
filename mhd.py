@@ -31,10 +31,9 @@ sp = lu
 
 # spatial parameters
 dp={"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
-baseN = 4
+baseN = 3
 nref = 0
 
-dp={"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
 mesh = PeriodicUnitCubeMesh(baseN, baseN, baseN, distribution_parameters=dp)
 mesh.coordinates.dat.data[:] *= 2 * pi
 x, y, z0 = SpatialCoordinate(mesh)
@@ -46,7 +45,7 @@ Q = FunctionSpace(mesh, "CG", 1)
 # time 
 t = Constant(0) 
 T = 1.0
-dt = Constant(0.0025)
+dt = Constant(0.01)
 
 alpha = CellDiameter(mesh)
 # (u, p, u_b, r, B, lmbda)
@@ -74,10 +73,13 @@ z_prev.sub(0).interpolate(u_init)
 z_prev.sub(4).interpolate(B_init)  # B component
 z.assign(z_prev)
 
-#u_avg = (u + up)/2
-#B_avg = (B + Bp)/2
-u_avg = u
-B_avg = B
+u_avg = (u + up)/2
+p_avg = (p + pp)/2
+u_b_avg = (u_b + u_bp)/2
+r_avg = (r + rp)/2
+B_avg = (B + Bp)/2
+lmbda_avg = (lmbda + lmbdap)/2
+
 
 def filter_term(u, u_b):
     return as_vector([
@@ -89,33 +91,35 @@ def filter_term(u, u_b):
 F = (
     # u
      inner((u - up)/dt, ut) * dx
-    - inner(dot(grad(up), u_bp), ut) * dx
-    - inner(p, div(ut)) * dx
-    + nu * inner(grad(u), grad(ut)) * dx
-    + inner(filter_term(u_avg, u_b), ut) * dx # correction term
+    #- inner(dot(grad(u_avg), u_b_avg), ut) * dx # advection
+    - inner(cross(u_b_avg, curl(u_avg)), ut) * dx
+    + inner(grad(dot(u_avg, u_b_avg)), ut) * dx
+    - inner(p_avg, div(ut)) * dx
+    + nu * inner(grad(u_avg), grad(ut)) * dx
+    #+ inner(filter_term(u_avg, u_b), ut) * dx # correction term
     - S * inner(dot(grad(B_avg), B_avg), ut) * dx
 
     # p
     - inner(div(u), pt) * dx
     # u_b
-    + inner(u_b, u_bt) * dx
-    + alpha**2 * inner(grad(u_b), grad(u_bt)) * dx
-    - inner(r, div(u_bt)) * dx
+    + inner(u_b_avg, u_bt) * dx
+    + alpha**2 * inner(grad(u_b_avg), grad(u_bt)) * dx
+    - inner(r_avg, div(u_bt)) * dx
     - inner(u_avg, u_bt) * dx
     # lmbda
     - inner(div(u_b), rt) * dx
     # B
     + inner((B - Bp)/dt, Bt) * dx
-    + inner(dot(grad(B_avg), u_b),  Bt) * dx
-    - inner(dot(grad(u_b), B_avg), Bt) * dx
+    + inner(dot(grad(B_avg), u_b_avg),  Bt) * dx
+    - inner(dot(grad(u_b_avg), B_avg), Bt) * dx
     + eta * inner(grad(B_avg), grad(Bt)) * dx
-    + inner(lmbda, div(Bt)) * dx
+    + inner(lmbda_avg, div(Bt)) * dx
     # lmbda
     + inner(div(B), lmbdat) * dx
 )
 
 bcs = None
-(u_, p_, u_b_, B_, r_, lmbda_) = z.subfunctions
+(u_, p_, u_b_, r_, B_, lmbda_) = z.subfunctions
 u_.rename("Velocity")
 p_.rename("Pressure")
 r_.rename("LM1")
@@ -123,7 +127,7 @@ B_.rename("MagneticField")
 u_b_.rename("filteredVelocity")
 lmbda_.rename("LM2")
 
-pvd = VTKFile("output/ns-alpha.pvd")
+pvd = VTKFile("output/mhd-alpha.pvd")
 pvd.write(*z.subfunctions, time = float(t))
 
 pb = NonlinearVariationalProblem(F, z, bcs)
@@ -131,15 +135,15 @@ solver = NonlinearVariationalSolver(pb, solver_parameters = sp)
 
 timestep = 0
 data_filename = "output/data.csv"
-fieldnames = ["t", "divu", "divB", "energy_total", "helicity_cross"]
+fieldnames = ["t", "divu", "divB", "energy", "helicity"]
 
 if mesh.comm.rank == 0:
     with open(data_filename, "w", newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
 
-energy_total = energy_uB(z.sub(0),z.sub(2), z.sub(4))
-helicity_cross = helicity_c(z.sub(0), z.sub(4))
+energy = energy_uB(z.sub(0),z.sub(2), z.sub(4))
+helicity = helicity_c(z.sub(0), z.sub(4))
 divu = div_u(z.sub(0))
 divB = div_B(z.sub(4))
 
@@ -148,8 +152,8 @@ if mesh.comm.rank == 0:
         "t": float(t),
         "divu": float(divu),
         "divB": float(divB),
-        "energy_total": float(energy_total),
-        "helicity_cross": float(helicity_cross),
+        "energy": float(energy),
+        "helicity": float(helicity),
     }
     with open(data_filename, "a", newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -161,8 +165,8 @@ while (float(t) < float(T-dt)+1.0e-10):
         print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}", flush=True)
     solver.solve()
     
-    energy_total = energy_uB(z.sub(0),z.sub(2), z.sub(4))
-    helicity_cross = helicity_c(z.sub(0), z.sub(4))
+    energy = energy_uB(z.sub(0),z.sub(2), z.sub(4))
+    helicity = helicity_c(z.sub(0), z.sub(4))
     divu = div_u(z.sub(0))
     divB = div_B(z.sub(4))
 
@@ -171,8 +175,8 @@ while (float(t) < float(T-dt)+1.0e-10):
         "t": float(t),
         "divu": float(divu),
         "divB": float(divB),
-        "energy_total": float(energy_total),
-        "helicity_cross": float(helicity_cross),
+        "energy": float(energy),
+        "helicity": float(helicity),
         }
         with open(data_filename, "a", newline='') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -181,4 +185,5 @@ while (float(t) < float(T-dt)+1.0e-10):
     print(row) 
     pvd.write(*z.subfunctions, time=float(t))
     timestep += 1
+    z_prev.assign(z)
 
