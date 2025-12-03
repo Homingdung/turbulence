@@ -45,7 +45,7 @@ sp = lu
 baseN = 64
 nref = 1
 
-mesh = Mesh("bfs-2d.msh")
+mesh = Mesh("mesh/bfs-2d.msh")
 mh = MeshHierarchy(mesh, nref)
 mesh = mh[-1]
 x, y = SpatialCoordinate(mesh)
@@ -75,18 +75,8 @@ z_prev = Function(Z)
 nu = Constant(0.0001)
 alpha = CellDiameter(mesh)
 
-U0 = Constant(1)
-kx= Constant(1)
-ky= Constant(1)
-
-u1 = U0 * sin(kx * x) * cos(ky * y)
-u2 = -U0 * cos(kx * x) * sin(ky * y)
-
-u_init = as_vector([u1, u2])
-w_init = scurl(u_init)
-
+u_init = as_vector([4*(2-y)*(y-1), 0])
 #z_prev.sub(0).interpolate(u_init)
-#z_prev.sub(4).interpolate(w_init)
 #z.assign(z_prev)
 
 u_avg = (u + up)/2
@@ -113,8 +103,8 @@ F = (
     + inner(w, wt) * dx
 )
 
-bcs = [DirichletBC(Z.sub(0), as_vector([4*(2-y)*(y-1), 0]), (10,)),
-           DirichletBC(Z.sub(0), Constant((0,0)),(11,))
+bcs = [DirichletBC(Z.sub(0), u_init, (10,)),
+        DirichletBC(Z.sub(0), Constant((0,0)),(11,))
 ]
 
 (u_, p_, u_b_, lmbda_, w_) = z.subfunctions
