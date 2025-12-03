@@ -1,0 +1,19 @@
+Point(1) = {0, 2, 0, 1.0};
+Point(2) = {10, 2, 0, 1.0};
+Point(3) = {10, 0, 0, 1.0};
+Point(4) = {1, 0, 0, 1.0};
+Point(5) = {1, 1, 0, 1.0};
+Point(6) = {-0, 1, 0, 1.0};
+Line(1) = {1, 2};
+Line(2) = {2, 3};
+Line(3) = {3, 4};
+Line(4) = {4, 5};
+Line(5) = {5, 6};
+Line(6) = {6, 1};
+Curve Loop(7) = {1, 2, 3, 4, 5, 6};
+Plane Surface(8) = {7};
+
+Physical Curve("Inflow", 10) = {6};
+Physical Curve("NoSlip", 11) = {1, 3, 4, 5};
+Physical Curve("Outflow", 12) = {2};
+Physical Surface("Channel", 100) = {8};
