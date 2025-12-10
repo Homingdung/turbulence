@@ -10,10 +10,9 @@ Line(3) = {3, 4};
 Line(4) = {4, 5};
 Line(5) = {5, 6};
 Line(6) = {6, 1};
-Curve Loop(7) = {1, 2, 3, 4, 5, 6};
+Line Loop(7) = {1, 2, 3, 4, 5, 6};
 Plane Surface(8) = {7};
-
-Physical Curve("Inflow", 10) = {6};
-Physical Curve("NoSlip", 11) = {1, 3, 4, 5};
-Physical Curve("Outflow", 12) = {2};
+Physical Line("Inflow", 10) = {6};
+Physical Line("NoSlip", 11) = {1, 3, 4, 5};
+Physical Line("Outflow", 12) = {2};
 Physical Surface("Channel", 100) = {8};

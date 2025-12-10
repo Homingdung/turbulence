@@ -47,7 +47,7 @@ nref = 1
 
 mesh = Mesh("mesh/bfs-2d.msh")
 mh = MeshHierarchy(mesh, nref)
-mesh = mh[-1]
+mesh = mh[0]
 x, y = SpatialCoordinate(mesh)
 
 # spatial discretization
@@ -72,7 +72,7 @@ z_prev = Function(Z)
 (up, pp, u_bp, lmbdap, wp) = split(z_prev)
 
 # initial condition
-nu = Constant(0.0001)
+nu = Constant(1e-6)
 alpha = CellDiameter(mesh)
 
 u_init = as_vector([4*(2-y)*(y-1), 0])
@@ -83,12 +83,13 @@ u_avg = (u + up)/2
 u_b_avg = (u_b + u_bp)/2
 w_avg = (w + wp)/2
 
+eps = lambda x: sym(grad(x))
 F = (
     # u
      inner((u - up)/dt, ut) * dx
     -inner(vcross(u_b_avg, w_avg), ut) * dx
     - inner(p, div(ut)) * dx
-    + nu * inner(grad(u_avg), grad(ut)) * dx
+    + 2 * nu * inner(eps(u_avg), eps(ut)) * dx
     # p
     - inner(div(u), pt) * dx
     # u_b
@@ -104,7 +105,7 @@ F = (
 )
 
 bcs = [DirichletBC(Z.sub(0), u_init, (10,)),
-        DirichletBC(Z.sub(0), Constant((0,0)),(11,))
+       DirichletBC(Z.sub(0), Constant((0,0)),(11,))
 ]
 
 (u_, p_, u_b_, lmbda_, w_) = z.subfunctions
@@ -115,7 +116,7 @@ lmbda_.rename("LM1")
 w_.rename("Vorticity")
 
 pvd = VTKFile("output/2dns-alpha.pvd")
-pvd.write(*z.subfunctions, time = float(t))
+#pvd.write(*z.subfunctions, time = float(t))
 
 pb = NonlinearVariationalProblem(F, z, bcs)
 solver = NonlinearVariationalSolver(pb, solver_parameters = sp)

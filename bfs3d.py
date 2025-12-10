@@ -1,4 +1,5 @@
 # reproduce Miles-Rebholz discretization about NS alpha model
+# bfs3d
 from firedrake import *
 import csv
 
@@ -20,23 +21,8 @@ lu = {
     "pc_factor_mat_solver_type": "mumps",
 }
 sp = lu
-
-# spatial parameters
-dp={"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
-baseN = 4
-nref = 0
-
-# temporal parameters
-base = UnitCubeMesh(baseN, baseN, baseN, distribution_parameters = dp)
-mh = MeshHierarchy(base, nref, distribution_parameters = dp)
-# shift from [0, 1]^3 to [-1, 1]^3
-scale = 2
-shift = -1
-# 2 * x - 1
-for m in mh:
-    m.coordinates.dat.data[:] = scale * m.coordinates.dat.data + shift
-mesh = mh[-1]
-x, y, z0 = SpatialCoordinate(mesh)
+mesh = Mesh("mesh/bfs-3d.msh")
+(x, y, z0) = SpatialCoordinate(mesh)
 
 # spatial discretization
 k = 2
@@ -59,30 +45,13 @@ z_prev = Function(Z)
 (up, pp, u_bp, lmbdap, wp, gammap) = split(z_prev)
 
 # initial condition
-nu = Constant(0)
+nu = Constant(0.0001)
 alpha = CellSize(mesh)
 
 a = Constant(1.25)  
 d = Constant(1.0)  
 
-damping = exp(-nu * d**2 * t)
-
-u1_expr = -a * (exp(a * x) * sin(a * y + d * z0) + exp(a * z0) * cos(a * x + d * y)) * damping
-u2_expr = -a * (exp(a * y) * sin(a * z0 + d * x) + exp(a * x) * cos(a * y + d * z0)) * damping
-u3_expr = -a * (exp(a * z0) * sin(a * x + d * y) + exp(a * y) * cos(a * z0 + d * x)) * damping
-
-term1 = exp(2*a*x) + exp(2*a*y) + exp(2*a*z0) + 2*sin(a*x+d*y)*cos(a*z0+d*x)*exp(a*(y+z0))
-term2 = 2 * sin(a*y+d*z0) * cos(a*x+d*y) * exp(a*(z0+x)) * 2 * sin(a*z0+d*x) * cos(a*y+d*z0) * exp(a*(x+y))
-
-p_init = -a**2/2 * (term1 + term2) * damping
-u_init = as_vector([u1_expr, u2_expr, u3_expr])
-w_init = curl(u_init)
-
-z_prev.sub(0).interpolate(u_init)
-z_prev.sub(1).interpolate(p_init)
-z_prev.sub(4).interpolate(w_init)
-
-z.assign(z_prev)
+u_init = as_vector([16*(2-y)*(y-1)*z0*(1-z0)*(y>1), 0, 0])
 
 u_avg = (u + up)/2
 u_b_avg = (u_b + u_bp)/2
@@ -115,9 +84,8 @@ F = (
 dirichlet_ids = ("on_boundary",)
 #bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids]
 
-bcs = [DirichletBC(Z.sub(0), u_init, "on_boundary")]
-#bcs += DirichletBC(Z.sub(1), p_init, "on_boundary")
-#bcs += DirichletBC(Z.sub(4), w_init, "on_boundary")
+bcs = [DirichletBC(Z.sub(0), u_init, 1),
+DirichletBC(Z.sub(0), Constant((0., 0., 0)), 3)]
 
 (u_, p_, u_b_, lmbda_, w_, gamma_) = z.subfunctions
 u_.rename("Velocity")
@@ -128,7 +96,7 @@ w_.rename("Vorticity")
 gamma_.rename("LM2")
 
 pvd = VTKFile("output/3dns-alpha.pvd")
-pvd.write(*z.subfunctions, time = float(t))
+#pvd.write(*z.subfunctions, time = float(t))
 
 pb = NonlinearVariationalProblem(F, z, bcs)
 solver = NonlinearVariationalSolver(pb, solver_parameters = sp)
@@ -160,7 +128,7 @@ timestep = 0
 while (float(t) < float(T-dt)+1.0e-10):
     t.assign(t+dt)
     if mesh.comm.rank == 0:
-        print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}", flush=True)
+        print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, nu = {float(nu)}", flush=True)
     solver.solve()
     
     energy = energy_u(z.sub(0))
