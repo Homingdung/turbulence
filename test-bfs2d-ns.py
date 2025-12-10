@@ -1,7 +1,9 @@
 # reproduce Miles-Rebholz discretization about NS alpha model
 # ns - 2d
+# remove the filter to test domain set up
 from firedrake import *
 import csv
+import firedrake.utils as firedrake_utils
 
 def helicity_u(u):
     w_z = scurl(u)
@@ -30,6 +32,57 @@ def scurl(x):
 def vcurl(x):
     return as_vector([x.dx(1), -x.dx(0)])
 
+class FixAtPointBC(firedrake.DirichletBC):
+    """
+    A special BC object for pinning a function at a point.
+    """
+    def __init__(self, V, g, bc_point):
+        super(FixAtPointBC, self).__init__(V, g, bc_point)
+        self.bc_point = bc_point
+
+    @firedrake_utils.cached_property
+    def nodes(self):
+        V = self.function_space()
+        x = firedrake.SpatialCoordinate(V.mesh())
+        xdist = x - self.bc_point
+
+        test = firedrake.TestFunction(V)
+        trial = firedrake.TrialFunction(V)
+        xphi = firedrake.assemble(ufl.inner(xdist * test, xdist * trial) * ufl.dx, diagonal=True)
+        phi = firedrake.assemble(ufl.inner(test, trial) * ufl.dx, diagonal=True)
+        with xphi.dat.vec as xu, phi.dat.vec as u:
+            xu.pointwiseDivide(xu, u)
+            min_index, min_value = xu.min()
+
+        nodes = V.dof_dset.lgmap.applyInverse([min_index])
+        nodes = nodes[nodes >= 0]
+        return nodes
+
+    def eval_at_point(self, V_func):
+        if self.min_index is None:
+            self.nodes      # To ensure that self.min_index is correctly initialized
+        V_func_value = V_func.vector().gather(global_indices=[self.min_index])[0]
+        return V_func_value
+
+    def assert_is_enforced(self, V_func):
+        bc_value = self.function_arg(self.bc_point)
+        V_func_value = self.eval_at_point(V_func)
+
+        assert abs(bc_value - V_func_value) < 1e-8
+
+    def dof_index_in_mixed_space(self, M, l):
+        x_sc = SpatialCoordinate(M.mesh())
+        dist_func = interpolate(Constant(-1.0) + sqrt(dot(x_sc - self.bc_point, x_sc - self.bc_point)), M.sub(l))
+
+        func_mixed = Function(M)
+        func_mixed.subfunctions[l].assign(dist_func)
+
+        with func_mixed.dat.vec as v:
+            v.shift(1.0)
+            min_index, min_value = v.min()
+            assert min_value < 1e-8
+
+        return min_index
 
 # solver parameter
 lu = {
@@ -62,14 +115,14 @@ T = 1.0
 dt = Constant(0.0025)
 
 # (u, p, u_b, lmbda, w, gamma)
-Z = MixedFunctionSpace([Vg, Q, Vg, Q, Vg_])
+Z = MixedFunctionSpace([Vg, Q])
 z = Function(Z)
 z_test = TestFunction(Z)
 z_prev = Function(Z)
 
-(u, p, u_b, lmbda, w) = split(z)
-(ut, pt, u_bt, lmbdat, wt) = split(z_test)
-(up, pp, u_bp, lmbdap, wp) = split(z_prev)
+(u, p) = split(z)
+(ut, pt) = split(z_test)
+(up, pp) = split(z_prev)
 
 # initial condition
 nu = Constant(1e-6)
@@ -80,41 +133,27 @@ u_init = as_vector([4*(2-y)*(y-1), 0])
 #z.assign(z_prev)
 
 u_avg = (u + up)/2
-u_b_avg = (u_b + u_bp)/2
-w_avg = (w + wp)/2
-
 eps = lambda x: sym(grad(x))
 F = (
     # u
      inner((u - up)/dt, ut) * dx
-    -inner(vcross(u_b_avg, w_avg), ut) * dx
+    -inner(vcross(u_avg, curl(u_avg)), ut) * dx
     - inner(p, div(ut)) * dx
     + 2 * nu * inner(eps(u_avg), eps(ut)) * dx
     # p
     - inner(div(u), pt) * dx
-    # u_b
-    + inner(u_b, u_bt) * dx
-    + alpha**2 * inner(grad(u_b), grad(u_bt)) * dx
-    - inner(lmbda, div(u_bt)) * dx
-    - inner(u, u_bt) * dx
-    # lmbda
-    - inner(div(u_b), lmbdat) * dx
-    # w
-    - inner(scurl(u), wt) * dx
-    + inner(w, wt) * dx
 )
 
 bcs = [DirichletBC(Z.sub(0), u_init, (10,)),
        DirichletBC(Z.sub(0), Constant((0,0)),(11,)),
         #DirichletBC(Z.sub(0).sub(0), Constant(1/3),(12,)), # outflow to balance the flux
+        FixAtPointBC(Z.sub(1), Constant(0), as_vector([10, 1])),
+
 ]
 
-(u_, p_, u_b_, lmbda_, w_) = z.subfunctions
+(u_, p_) = z.subfunctions
 u_.rename("Velocity")
 p_.rename("Pressure")
-u_b_.rename("filteredVelocity")
-lmbda_.rename("LM1")
-w_.rename("Vorticity")
 
 pvd = VTKFile("output/2dns-alpha.pvd")
 #pvd.write(*z.subfunctions, time = float(t))

@@ -45,7 +45,7 @@ sp = lu
 baseN = 64
 nref = 1
 
-mesh = Mesh("mesh/bfs-2d.msh")
+mesh = Mesh("mesh/shed.msh")
 mh = MeshHierarchy(mesh, nref)
 mesh = mh[0]
 x, y = SpatialCoordinate(mesh)
@@ -104,9 +104,8 @@ F = (
     + inner(w, wt) * dx
 )
 
-bcs = [DirichletBC(Z.sub(0), u_init, (10,)),
-       DirichletBC(Z.sub(0), Constant((0,0)),(11,)),
-        #DirichletBC(Z.sub(0).sub(0), Constant(1/3),(12,)), # outflow to balance the flux
+bcs = [DirichletBC(Z.sub(0), u_init, (1,)),
+       DirichletBC(Z.sub(0), Constant((0,0)),(2,))
 ]
 
 (u_, p_, u_b_, lmbda_, w_) = z.subfunctions
