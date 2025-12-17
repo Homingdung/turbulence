@@ -2,8 +2,8 @@
 from firedrake import *
 import csv
 
-nu = Constant(1e-4)
-eta = Constant(1e-4)
+nu = Constant(0)
+eta = Constant(0)
 S = Constant(1)
 
 def helicity_c(u, B):

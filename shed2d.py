@@ -9,8 +9,8 @@ def helicity_u(u):
     u = as_vector([u[0], u[1], 0])
     return assemble(inner(u, w)*dx)
 
-def energy_u(u):
-    return 0.5 * assemble(inner(u, u) * dx)
+def energy_u(u, u_b):
+    return 0.5 * assemble(inner(u, u_b) * dx)
     
 def div_u(u):
     return norm(div(u), "L2")
@@ -130,7 +130,7 @@ if mesh.comm.rank == 0:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
 
-energy = energy_u(z.sub(0))
+energy = energy_u(z.sub(0), z.sub(2))
 helicity = helicity_u(z.sub(0))
 divu = div_u(z.sub(0))
 
@@ -151,7 +151,7 @@ while (float(t) < float(T-dt)+1.0e-10):
         print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}", flush=True)
     solver.solve()
     
-    energy = energy_u(z.sub(0))
+    energy = energy_u(z.sub(0), z.sub(2))
     helicity = helicity_u(z.sub(0))
     divu = div_u(z.sub(0))
 
