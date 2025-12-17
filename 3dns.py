@@ -5,8 +5,8 @@ import csv
 def helicity_u(u):
     return assemble(inner(u, curl(u))*dx)
 
-def energy_u(u):
-    return 0.5 * assemble(inner(u, u) * dx)
+def energy_u(u, u_b):
+    return 0.5 * assemble(inner(u, u_b) * dx)
     
 def div_u(u):
     return norm(div(u), "L2")
@@ -78,11 +78,10 @@ p_init = -a**2/2 * (term1 + term2) * damping
 u_init = as_vector([u1_expr, u2_expr, u3_expr])
 w_init = curl(u_init)
 
-z_prev.sub(0).interpolate(u_init)
-z_prev.sub(1).interpolate(p_init)
-z_prev.sub(4).interpolate(w_init)
+z.sub(0).interpolate(u_init)
+z.sub(4).interpolate(w_init)
 
-z.assign(z_prev)
+z_prev.assign(z)
 
 u_avg = (u + up)/2
 u_b_avg = (u_b + u_bp)/2
@@ -91,9 +90,9 @@ p_avg = (p + pp)/2
 
 F = (
     # u
-    inner((u - up)/dt, ut) * dx
+      inner((u - up)/dt, ut) * dx
     -inner(cross(u_b_avg, w_avg), ut) * dx
-    - inner(p_avg, div(ut)) * dx
+    + inner(grad(p_avg), ut) * dx
     + nu * inner(grad(u_avg), grad(ut)) * dx
     # p
     - inner(div(u), pt) * dx
@@ -113,11 +112,12 @@ F = (
 )
 
 dirichlet_ids = ("on_boundary",)
-#bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids]
 
-bcs = [DirichletBC(Z.sub(0), u_init, "on_boundary")]
-#bcs += DirichletBC(Z.sub(1), p_init, "on_boundary")
-#bcs += DirichletBC(Z.sub(4), w_init, "on_boundary")
+bcs = [
+        DirichletBC(Z.sub(0), 0, "on_boundary"),
+        DirichletBC(Z.sub(2), 0, "on_boundary"),
+        DirichletBC(Z.sub(4), 0, "on_boundary")
+]
 
 (u_, p_, u_b_, lmbda_, w_, gamma_) = z.subfunctions
 u_.rename("Velocity")
@@ -141,7 +141,7 @@ if mesh.comm.rank == 0:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
 
-energy = energy_u(z.sub(0))
+energy = energy_u(z.sub(0), z.sub(2)) #u,u to avoid 0 initial energy
 helicity = helicity_u(z.sub(0))
 divu = div_u(z.sub(0))
 
@@ -163,7 +163,7 @@ while (float(t) < float(T-dt)+1.0e-10):
         print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}", flush=True)
     solver.solve()
     
-    energy = energy_u(z.sub(0))
+    energy = energy_u(z.sub(0), z.sub(2))
     helicity = helicity_u(z.sub(0))
     divu = div_u(z.sub(0))
 
