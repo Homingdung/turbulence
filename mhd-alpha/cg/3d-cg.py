@@ -30,17 +30,15 @@ lu = {
 sp = lu
 
 # spatial parameters
-dp={"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
 baseN = 4
 nref = 0
-
-mesh = PeriodicUnitCubeMesh(baseN, baseN, baseN, distribution_parameters=dp)
+mesh = PeriodicUnitCubeMesh(baseN, baseN, baseN)
 mesh.coordinates.dat.data[:] *= 2 * pi
 x, y, z0 = SpatialCoordinate(mesh)
 
 # spatial discretization
 Vg = VectorFunctionSpace(mesh, "CG", 2)
-Q = FunctionSpace(mesh, "DG", 0)
+Q = FunctionSpace(mesh, "CG", 1)
 
 # time 
 t = Constant(0) 
