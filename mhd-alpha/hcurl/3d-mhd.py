@@ -42,6 +42,7 @@ Vg = VectorFunctionSpace(mesh, "CG", 2)
 Q = FunctionSpace(mesh, "CG", 1)
 Vd = FunctionSpace(mesh, "RT", 1)
 Vc = FunctionSpace(mesh, "N1curl", 1)
+Vn = FunctionSpace(mesh, "DG", 0)
 
 # time 
 t = Constant(0) 
@@ -59,12 +60,55 @@ z_prev = Function(Z)
 (ut, Pt, u_bt, lmbdat, wt, Bt, Et, jt, Ht) = split(z_test)
 (up, Pp, u_bp, lmbdap, wp, Bp, Ep, jp, Hp) = split(z_prev)
 
-# initial condition Politano-1995
-u_init = as_vector([cos(2*pi*z0), sin(2*pi*z0), sin(2*pi*(x+y))])
-B_init = as_vector([cos(2*pi*z0), sin(2*pi*z0), sin(2*pi*(x+y))])
+#Grauer-Marliani-1999
+u_init = as_vector([-2 * sin(y), 2 * sin(x), 0])
+B_init = 0.8 * as_vector([-2 * sin(2*y) + sin(z0), 2 * sin(x) + sin(z0), sin(x) + sin(y)])
+
+
+def project_ic(B_init):
+    # Need to project the initial conditions
+    # such that div(B) = 0 and B·n = 0
+    Zp = MixedFunctionSpace([Vd, Vn])
+    zp = Function(Zp)
+    (B, p) = split(zp)
+    dirichlet_ids = ("on_boundary",)
+    bcp = [DirichletBC(Zp.sub(0), 0, subdomain) for subdomain in dirichlet_ids]
+    # Write Lagrangian
+    L = (
+          0.5*inner(B, B)*dx
+        - inner(B_init, B)*dx
+        - inner(p, div(B))*dx
+        )
+
+    Fp = derivative(L, zp, TestFunction(Zp))
+    spp = {
+        "mat_type": "nest",
+        "snes_type": "ksponly",
+        "snes_monitor": None,
+        "ksp_monitor": None,
+        "ksp_max_it": 1000,
+        "ksp_norm_type": "preconditioned",
+        "ksp_type": "minres",
+        "pc_type": "fieldsplit",
+        "pc_fieldsplit_type": "additive",
+        "fieldsplit_pc_type": "cholesky",
+        "fieldsplit_pc_factor_mat_solver_type": "mumps",
+        "ksp_atol": 1.0e-5,
+        "ksp_rtol": 1.0e-5,
+        "ksp_minres_nutol": 1E-8,
+        "ksp_convergence_test": "skip",
+    }
+    gamma = Constant(1E5)
+    Up = 0.5*(inner(B, B) + inner(div(B) * gamma, div(B)) + inner(p * (1/gamma), p))*dx
+    Jp = derivative(derivative(Up, zp), zp)
+    solve(Fp == 0, zp, bcp, Jp=Jp, solver_parameters=spp,
+          options_prefix="B_init_div_free_projection")
+ 
+    return zp.subfunctions[0]
+
 
 z_prev.sub(0).interpolate(u_init)
-z_prev.sub(5).interpolate(B_init)  # B component
+z_prev.sub(5).interpolate(project_ic(B_init))  # B component
 z.assign(z_prev)
 
 u_avg = (u + up)/2
