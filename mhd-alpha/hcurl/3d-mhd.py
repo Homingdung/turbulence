@@ -60,9 +60,15 @@ z_prev = Function(Z)
 (ut, Pt, u_bt, lmbdat, wt, Bt, Et, jt, Ht) = split(z_test)
 (up, Pp, u_bp, lmbdap, wp, Bp, Ep, jp, Hp) = split(z_prev)
 
-#Grauer-Marliani-1999
-u_init = as_vector([-2 * sin(y), 2 * sin(x), 0])
-B_init = 0.8 * as_vector([-2 * sin(2*y) + sin(z0), 2 * sin(x) + sin(z0), sin(x) + sin(y)])
+u1 = -sin(pi*(x-1/2))*cos(pi*(y-1/2))*z0*(z0-1)
+u2 = cos(pi*(x-1/2))*sin(pi*(y-1/2))*z0*(z0-1)
+u_init = as_vector([u1, u2, 0])
+B1 = -sin(pi*x)*cos(pi*y)
+B2 = cos(pi*x)*sin(pi*y)
+B_init = as_vector([B1, B2, 0])
+    
+z_prev.sub(0).interpolate(u_init)
+z_prev.sub(6).interpolate(B_init)
 
 
 def project_ic(B_init):
@@ -107,13 +113,20 @@ def project_ic(B_init):
     return zp.subfunctions[0]
 
 
-z_prev.sub(0).interpolate(u_init)
-z_prev.sub(5).interpolate(project_ic(B_init))  # B component
+#z_prev.sub(0).interpolate(u_init)
+#z_prev.sub(5).interpolate(project_ic(B_init))  # B component
 z.assign(z_prev)
 
 u_avg = (u + up)/2
 B_avg = (B + Bp)/2
-u_b_avg = (u_b + u_bp)/2
+#u_b_avg = (u_b + u_bp)/2
+u_b_avg = u_b
+P_avg = P
+j_avg = j
+H_avg = H
+w_avg = w
+E_avg = E
+lmbda_avg = lmbda
 def filter_term(u, u_b):
     return as_vector([
         u[0] * u_b[0].dx(0) + u[1] * u_b[1].dx(0) + u[2] * u_b[2].dx(0),  # i = 0 分量
@@ -125,34 +138,34 @@ F = (
     # u
      inner((u - up)/dt, ut) * dx
     #+ inner(filter_term(u_avg, u_b), ut) * dx # correction term
-    - inner(cross(u_b_avg, w), ut) * dx # advection term
-    + inner(grad(P), ut) * dx
+    + inner(cross(u_b_avg, w_avg), ut) * dx # advection term
+    + inner(grad(P_avg), ut) * dx
     + nu * inner(curl(u_avg), curl(ut)) * dx
-    - S * inner(cross(j, H), ut) * dx
+    - S * inner(cross(j_avg, H_avg), ut) * dx
     # p
     + inner(u_avg, grad(Pt)) * dx
     # u_b
-    + inner(u_b, u_bt) * dx
-    + alpha**2 * inner(curl(u_b), curl(u_bt)) * dx
-    + inner(grad(lmbda), u_bt) * dx
+    + inner(u_b_avg, u_bt) * dx
+    + alpha**2 * inner(curl(u_b_avg), curl(u_bt)) * dx
+    + inner(grad(lmbda_avg), u_bt) * dx
     - inner(u_avg, u_bt) * dx
     # lmbda
-    + inner(u_b, grad(lmbdat)) * dx
+    + inner(u_b_avg, grad(lmbdat)) * dx
     # w
-    + inner(w, wt) * dx
+    + inner(w_avg, wt) * dx
     - inner(curl(u_avg), wt) * dx
     # B
     + inner((B - Bp)/dt, Bt) * dx
-    + inner(curl(E), Bt) * dx
+    + inner(curl(E_avg), Bt) * dx
     # E
-    + inner(E, Et) * dx
-    + inner(cross(u_b, H), Et) * dx
-    - eta * inner(j, Et) * dx
+    + inner(E_avg, Et) * dx
+    + inner(cross(u_b_avg, H), Et) * dx
+    - eta * inner(j_avg, Et) * dx
     # j 
-    + inner(j, jt) * dx
+    + inner(j_avg, jt) * dx
     - inner(B_avg, curl(jt)) * dx
     # H
-    + inner(H, Ht) * dx
+    + inner(H_avg, Ht) * dx
     + inner(B_avg, Ht) * dx
 )
 
