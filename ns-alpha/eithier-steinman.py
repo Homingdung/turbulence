@@ -1,4 +1,5 @@
 # reproduce Miles-Rebholz discretization about NS alpha model
+# Eithier-Steinman test (Taylor-Green vortex)
 from firedrake import *
 import csv
 

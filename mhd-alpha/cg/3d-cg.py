@@ -73,10 +73,14 @@ z.assign(z_prev)
 
 u_avg = (u + up)/2
 p_avg = (p + pp)/2
-u_b_avg = (u_b + u_bp)/2
-r_avg = (r + rp)/2
+u_b_avg = u_b
+r_avg = r
 B_avg = (B + Bp)/2
-lmbda_avg = (lmbda + lmbdap)/2
+lmbda_avg = lmbda
+H_avg = H
+j_avg = j
+E_avg= E
+w_avg = w
 
 
 def filter_term(u, u_b):
@@ -85,6 +89,7 @@ def filter_term(u, u_b):
         u[0] * u_b[0].dx(1) + u[1] * u_b[1].dx(1) + u[2] * u_b[2].dx(1),  # i = 1 分量
         u[0] * u_b[0].dx(2) + u[1] * u_b[1].dx(2) + u[2] * u_b[2].dx(2),  # i = 2 分量
     ])
+
 
 F = (
     # u
