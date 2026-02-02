@@ -33,7 +33,7 @@ sp = lu
 # spatial parameters
 baseN = 4
 nref = 0
-mesh = UnitCubeMesh(baseN, baseN, baseN)
+mesh = PeriodicUnitCubeMesh(baseN, baseN, baseN)
 x, y, z0 = SpatialCoordinate(mesh)
 
 # spatial discretization
@@ -108,11 +108,11 @@ def project_ic(B_init):
  
     return zp.subfunctions[0]
 
-z_prev.sub(0).interpolate(u_init)
-z_prev.sub(4).interpolate(B_init)
-
 #z_prev.sub(0).interpolate(u_init)
-#z_prev.sub(4).interpolate(project_ic(B_init))  # B component
+#z_prev.sub(4).interpolate(B_init)
+
+z_prev.sub(0).interpolate(u_init)
+z_prev.sub(4).interpolate(project_ic(B_init))  # B component
 z.assign(z_prev)
 
 u_avg = (u + up)/2
@@ -164,8 +164,9 @@ F = (
 )
 
 dirichlet_ids = ("on_boundary",)
-bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids
-]
+#bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids]
+bcs = None
+
 (u_, P_, u_b_, w_, B_, E_, j_, H_) = z.subfunctions
 u_.rename("Velocity")
 P_.rename("Pressure")
