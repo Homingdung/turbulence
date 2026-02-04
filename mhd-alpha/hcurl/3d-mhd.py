@@ -67,6 +67,27 @@ B1 = -sin(pi*x)*cos(pi*y)
 B2 = cos(pi*x)*sin(pi*y)
 B_init = as_vector([B1, B2, 0])
 
+alpha = CellDiameter(mesh)
+# solve for u_b_init
+def u_b_solver(u):
+    u_init = Function(Vc).interpolate(u)
+    u_b = TrialFunction(Vc)
+    u_sol = Function(Vc)
+    v = TestFunction(Vc)
+    a = inner(u_b, v) * dx + alpha**2 * inner(curl(u_b), curl(v)) * dx
+    L = inner(u_init, v) * dx
+    sp_ub = {  
+           "ksp_type":"gmres",
+           "pc_type": "ilu",
+    }
+    bcs0 = [DirichletBC(Vc, 0, "on_boundary")]
+    pb0 = LinearVariationalProblem(a, L, u_sol, bcs = bcs0)
+    solver0 = LinearVariationalSolver(pb0, solver_parameters = sp_ub)
+    solver0.solve()
+    return u_sol
+
+u_b_init = u_b_solver(u_init)
+
 def project_ic(B_init):
     # Need to project the initial conditions
     # such that div(B) = 0 and B·n = 0
@@ -113,6 +134,7 @@ def project_ic(B_init):
 
 z_prev.sub(0).interpolate(u_init)
 z_prev.sub(4).interpolate(project_ic(B_init))  # B component
+z_prev.sub(2).interpolate(u_b_init)
 z.assign(z_prev)
 
 u_avg = (u + up)/2
