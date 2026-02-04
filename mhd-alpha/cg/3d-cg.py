@@ -77,10 +77,6 @@ u_b_avg = u_b
 r_avg = r
 B_avg = (B + Bp)/2
 lmbda_avg = lmbda
-H_avg = H
-j_avg = j
-E_avg= E
-w_avg = w
 
 
 def filter_term(u, u_b):
