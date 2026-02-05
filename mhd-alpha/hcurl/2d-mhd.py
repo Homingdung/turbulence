@@ -4,6 +4,7 @@ from firedrake import *
 import csv
 import numpy as np
 from mpi4py import MPI
+import matplotlib.pyplot as plt
 
 nu = Constant(1e-3)
 eta = Constant(1e-3)
@@ -60,7 +61,7 @@ lu = {
 sp = lu
 
 # spatial parameters
-baseN = 128
+baseN = 100
 nref = 0
 Lx = 3
 Ly = 1
@@ -80,7 +81,7 @@ Vn = FunctionSpace(mesh, "DG", 0)
 
 # time 
 t = Constant(0) 
-T = 10.0
+T = 20.0
 dt = Constant(0.1)
 
 # (u, P, u_b, w, B, E, j, H)
@@ -254,7 +255,6 @@ def spectrum(u, B):
         E_u[k] = np.sum(E_u_k[mask])
         E_B[k] = np.sum(E_B_k[mask])
 
-    import matplotlib.pyplot as plt
 
     k = np.arange(1, len(E_u))
 
@@ -264,7 +264,7 @@ def spectrum(u, B):
 
     # 参考 k^{-5/3}
     plt.loglog(k, 1e-2 * k**(-5/3), '--', label=r'$k^{-5/3}$')
-    plt.loglog(k, 1e-3 * k**(-3.0),  ':', label=r'$k^{-3}$')
+    #plt.loglog(k, 1e-3 * k**(-3.0),  ':', label=r'$k^{-3}$')
     
     plt.xlabel(r'$k$')
     plt.ylabel(r'$E(k)$')
@@ -360,8 +360,10 @@ if mesh.comm.rank == 0:
 
 while (float(t) < float(T-dt)+1.0e-10):
     t.assign(t+dt)
+    dofs = Z.dim()
+    dofs_per_core = dofs / COMM_WORLD.size
     if mesh.comm.rank == 0:
-        print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}", flush=True)
+        print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}, dofs = {dofs}, dofs_per_core = {dofs_per_core}", flush=True)
     solver.solve()
     u_b = u_b_solver(z.sub(0)) 
     energy = energy_uB(z.sub(0),u_b, z.sub(4)) #u, u_b, B
