@@ -10,14 +10,14 @@ S = Constant(1)
 def helicity_c(u, B):
     return assemble(inner(u, B)*dx)
 
-def energy_uB(u, u_b, B):
-    return 0.5 * assemble(inner(u, u_b) * dx + S * inner(B, B) * dx)
-    
 def div_u(u):
     return norm(div(u), "L2")
 
 def div_B(B):
     return norm(div(B), "L2")
+
+def energy_uB(u, u_b, B):
+    return 0.5 * assemble(inner(u, u_b) * dx + S * inner(B, B) * dx)
 
 
 # solver parameter
@@ -49,6 +49,8 @@ T = 1.0
 dt = Constant(0.01)
 
 alpha = CellDiameter(mesh)
+    
+
 # (u, P, u_b, w, B, E, j, H)
 Z = MixedFunctionSpace([Vc, Q, Vc, Vc, Vd, Vc, Vc, Vc])
 z = Function(Z)
