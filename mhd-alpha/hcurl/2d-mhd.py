@@ -5,8 +5,8 @@ import csv
 import numpy as np
 from mpi4py import MPI
 
-nu = Constant(0)
-eta = Constant(0)
+nu = Constant(1e-3)
+eta = Constant(1e-3)
 S = Constant(1)
 
 def helicity_c(u, B):
@@ -65,7 +65,10 @@ nref = 0
 Lx = 3
 Ly = 1
 dp={"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
-mesh = PeriodicRectangleMesh(baseN, baseN, Lx, Ly, direction="x", distribution_parameters=dp)
+mesh = PeriodicUnitSquareMesh(baseN, baseN, distribution_parameters=dp)
+mesh.coordinates.dat.data[:] *= 2 * pi
+
+
 x, y = SpatialCoordinate(mesh)
 
 # spatial discretization
@@ -93,17 +96,16 @@ z_prev = Function(Z)
 def v_grad(x):
     return as_vector([-x.dx(1), x.dx(0)])
 
-lmbda = 10
-phi = 1/lmbda * ln(cosh(lmbda * (y - 0.5)))
-m = 1
-kx = 2*pi*m/Lx
-eps = 5e-2
-#del_psi = eps * cos(kx * x) * (1.0 / cosh(lmbda*(y-0.5))**2)
-del_psi = eps * sin(pi* y) * cos(2*pi/3 * x)
+# Biskamp-Welter-1989
+phi = cos(x + 1.4) + cos(y + 0.5)
+psi = cos(2 * x + 2.3) + cos(y + 4.1)
 
-u_init = as_vector([1, 0])
-B_init = v_grad(phi + del_psi)
- 
+#phi = cos(x) + cos(y)
+#psi = 0.5* cos(2 * x) + cos(y)
+
+u_init = v_grad(psi)
+B_init = v_grad(phi)
+  
 alpha = CellDiameter(mesh)
 # solve for u_b_init
 def u_b_solver(u):
@@ -146,7 +148,6 @@ def u_b_solver(u):
     solver0.solve()
     return u_b
 
-u_b_init = u_b_solver(u_init)
 
 def project_ic(B_init):
     # Need to project the initial conditions
@@ -190,6 +191,7 @@ def project_ic(B_init):
     return zp.subfunctions[0]
 
 
+u_b_init = u_b_solver(u_init)
 z_prev.sub(0).interpolate(u_init)
 z_prev.sub(4).interpolate(project_ic(B_init))  # B component
 z_prev.sub(2).interpolate(u_b_init)
@@ -213,8 +215,8 @@ def filter_term(u, u_b):
 
 def spectrum(u, B):
     N = baseN
-    x = np.linspace(0, float(Lx), N, endpoint = False)
-    y = np.linspace(0, float(Ly), N, endpoint = False)
+    x = np.linspace(0, 2 * np.pi, N, endpoint = False)
+    y = np.linspace(0, 2 * np.pi, N, endpoint = False)
     X, Y = np.meshgrid(x, y, indexing="ij")
 
 # uniform mesh for evaluation
