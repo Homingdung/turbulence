@@ -2,6 +2,8 @@
 # helicity, cross helicity, energy
 from firedrake import *
 import csv
+import numpy as np
+from mpi4py import MPI
 
 nu = Constant(0)
 eta = Constant(0)
@@ -21,12 +23,21 @@ def energy_uB(u, u_b, B):
 
 
 # solver parameter
+ICNTL_14 = 5000
+tele_reduc_fac = int(MPI.COMM_WORLD.size/4)
+if tele_reduc_fac < 1:
+    tele_reduc_fac = 1
+
 lu = {
     "mat_type": "aij",
     "snes_type": "newtonls",
     "ksp_type": "preonly",
-    "pc_type": "lu",
-    "pc_factor_mat_solver_type": "mumps",
+    "pc_type": "telescope",
+    "pc_telescope_reduction_factor": tele_reduc_fac,
+    "pc_telescope_subcomm_type": "contiguous",
+    "telescope_pc_type": "lu",
+    "telescope_pc_factor_mat_solver_type": "mumps",
+    "telescope_pc_factor_mat_mumps_icntl_14": ICNTL_14,
 }
 sp = lu
 
@@ -208,8 +219,9 @@ def helicity_m(B):
     v = TestFunction(Vc)
     F_curl  = inner(curl(A), curl(v)) * dx - inner(B, curl(v)) * dx
     sp = {  
-           "ksp_type":"gmres",
-           "pc_type": "ilu",
+           "ksp_type":"preonly",
+           "pc_type": "lu",
+           "pc_factor_mat_solver_type": "mumps",
     }
     bcs_curl = [DirichletBC(Vc, 0, "on_boundary")]
     pb_curl = NonlinearVariationalProblem(F_curl, A, bcs_curl)
@@ -217,7 +229,7 @@ def helicity_m(B):
     solver_curl.solve()
     return assemble(inner(A, B)*dx)
 
-pb = NonlinearVariationalProblem(F, z, bcs)
+pb = NonlinearVariationalProblem(F, z)
 solver = NonlinearVariationalSolver(pb, solver_parameters = sp)
 
 timestep = 0
@@ -274,8 +286,9 @@ while (float(t) < float(T-dt)+1.0e-10):
         with open(data_filename, "a", newline='') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writerow(row)
-
-    print(row) 
+    if mesh.comm.rank == 0:
+        print(row)
+ 
     pvd.write(*z.subfunctions, time=float(t))
     timestep += 1
     z_prev.assign(z)
