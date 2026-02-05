@@ -5,8 +5,8 @@ import csv
 import numpy as np
 from mpi4py import MPI
 
-nu = Constant(1e-3)
-eta = Constant(1e-3)
+nu = Constant(0)
+eta = Constant(0)
 S = Constant(1)
 
 def helicity_c(u, B):
@@ -101,30 +101,52 @@ eps = 5e-2
 #del_psi = eps * cos(kx * x) * (1.0 / cosh(lmbda*(y-0.5))**2)
 del_psi = eps * sin(pi* y) * cos(2*pi/3 * x)
 
-u_init = as_vector([0, 0])
+u_init = as_vector([1, 0])
 B_init = v_grad(phi + del_psi)
  
 alpha = CellDiameter(mesh)
 # solve for u_b_init
 def u_b_solver(u):
     u_init = Function(Vc).interpolate(u)
-    u_b = TrialFunction(Vc)
-    u_sol = Function(Vc)
+    u_b = Function(Vc)
     v = TestFunction(Vc)
-    a = inner(u_b, v) * dx + alpha**2 * inner(curl(u_b), curl(v)) * dx
-    L = inner(u_init, v) * dx
+    F = inner(u_b, v) * dx + alpha**2 * inner(curl(u_b), curl(v)) * dx - inner(u_init, v) * dx
     sp_ub = {  
-           "ksp_type":"preonly",
-           "pc_type": "lu",
-           "pc_factor_mat_solver_type": "mumps",
+           "ksp_type":"gmres",
+           "pc_type": "ilu",
     }
-    bcs0 = [DirichletBC(Vc, 0, "on_boundary")]
-    pb0 = LinearVariationalProblem(a, L, u_sol, bcs = bcs0)
-    solver0 = LinearVariationalSolver(pb0, solver_parameters = sp_ub)
-    solver0.solve()
-    return u_sol
+    sp_riesz = {
+         "mat_type": "nest",
+        "snes_type": "ksponly",
+        "snes_monitor": None,
+        "ksp_monitor": None,
+        "ksp_max_it": 1000,
+        "ksp_norm_type": "preconditioned",
+        "ksp_type": "minres",
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "mumps",
+        "ksp_atol": 1.0e-5,
+        "ksp_rtol": 1.0e-5,
+        "ksp_minres_nutol": 1E-8,
+        "ksp_convergence_test": "skip",
 
-#u_b_init = u_b_solver(u_init)
+    }
+    
+    def riesz_u_b(u, v):
+        return inner(u, v) * dx + alpha **2 * inner(curl(u), curl(v)) * dx
+    
+    u_b0 = TrialFunction(Vc)
+    u_b1 = TestFunction(Vc)
+    Jp_riesz = riesz_u_b(u_b0, u_b1)
+
+    bcs0 = [DirichletBC(Vc, 0, "on_boundary")]
+
+    pb0 = NonlinearVariationalProblem(F, u_b, bcs0, Jp = Jp_riesz)
+    solver0 = NonlinearVariationalSolver(pb0, solver_parameters = sp_riesz, options_prefix = "solve curlcurl for u_b") 
+    solver0.solve()
+    return u_b
+
+u_b_init = u_b_solver(u_init)
 
 def project_ic(B_init):
     # Need to project the initial conditions
@@ -169,8 +191,8 @@ def project_ic(B_init):
 
 
 z_prev.sub(0).interpolate(u_init)
-#z_prev.sub(2).interpolate(u_b_init) 
-z_prev.sub(4).interpolate(B_init) 
+z_prev.sub(4).interpolate(project_ic(B_init))  # B component
+z_prev.sub(2).interpolate(u_b_init)
 z.assign(z_prev)
 
 u_avg = (u + up)/2
@@ -283,8 +305,8 @@ F = (
 )
 
 dirichlet_ids = ("on_boundary",)
-bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids]
-#bcs = None
+#bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids]
+bcs = None
 
 (u_, P_, u_b_, w_, B_, E_, j_, H_) = z.subfunctions
 u_.rename("Velocity")
@@ -302,7 +324,7 @@ def helicity_m(B):
     # 2D is trivially 0
     return float(0)
 
-pb = NonlinearVariationalProblem(F, z, bcs)
+pb = NonlinearVariationalProblem(F, z)
 solver = NonlinearVariationalSolver(pb, solver_parameters = sp)
 
 timestep = 0
@@ -339,14 +361,14 @@ while (float(t) < float(T-dt)+1.0e-10):
     if mesh.comm.rank == 0:
         print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}", flush=True)
     solver.solve()
-    
-    u_b = u_b_solver(z.sub(0)) # solve for u_b to make sure the energy at evaluated at the same time level 
+    u_b = u_b_solver(z.sub(0)) 
     energy = energy_uB(z.sub(0),u_b, z.sub(4)) #u, u_b, B
     crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, u_b, B
     maghelicity = helicity_m(z.sub(4)) # B
     divu = div_u(z.sub(0))
     divB = div_B(z.sub(4))
-    
+
+
     if mesh.comm.rank == 0:
         row = {
         "t": float(t),
@@ -367,4 +389,4 @@ while (float(t) < float(T-dt)+1.0e-10):
     pvd.write(*z.subfunctions, time=float(t))
     timestep += 1
     z_prev.assign(z)
-    timestep += 1
+
