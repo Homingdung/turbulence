@@ -177,7 +177,7 @@ F = (
     + inner(curl(E_avg), Bt) * dx
     # E
     + inner(E_avg, Et) * dx
-    + inner(cross(u_b_avg, H), Et) * dx
+    + inner(cross(u_b_avg, H_avg), Et) * dx
     - eta * inner(j_avg, Et) * dx
     # j 
     + inner(j_avg, jt) * dx
