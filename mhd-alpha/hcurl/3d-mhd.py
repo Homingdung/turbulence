@@ -159,7 +159,7 @@ F = (
     # u
      inner((u - up)/dt, ut) * dx
     #+ inner(filter_term(u_avg, u_b), ut) * dx # correction term
-    + inner(cross(u_b_avg, w_avg), ut) * dx # advection term
+    - inner(cross(u_b_avg, w_avg), ut) * dx # advection term
     + inner(grad(P_avg), ut) * dx
     + nu * inner(curl(u_avg), curl(ut)) * dx
     - S * inner(cross(j_avg, H_avg), ut) * dx
@@ -184,7 +184,7 @@ F = (
     - inner(B_avg, curl(jt)) * dx
     # H
     + inner(H_avg, Ht) * dx
-    + inner(B_avg, Ht) * dx
+    - inner(B_avg, Ht) * dx
 )
 
 dirichlet_ids = ("on_boundary",)
