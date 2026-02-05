@@ -1,9 +1,12 @@
-# 2d-mhd 
+# 2d-mhd
+# tearing mode
 from firedrake import *
 import csv
+import numpy as np
+from mpi4py import MPI
 
-nu = Constant(0)
-eta = Constant(0)
+nu = Constant(1e-3)
+eta = Constant(1e-3)
 S = Constant(1)
 
 def helicity_c(u, B):
@@ -38,19 +41,31 @@ def acurl(x):
                      ])
 
 # solver parameter
+ICNTL_14 = 5000
+tele_reduc_fac = int(MPI.COMM_WORLD.size/4)
+if tele_reduc_fac < 1:
+    tele_reduc_fac = 1
+
 lu = {
     "mat_type": "aij",
     "snes_type": "newtonls",
     "ksp_type": "preonly",
-    "pc_type": "lu",
-    "pc_factor_mat_solver_type": "mumps",
+    "pc_type": "telescope",
+    "pc_telescope_reduction_factor": tele_reduc_fac,
+    "pc_telescope_subcomm_type": "contiguous",
+    "telescope_pc_type": "lu",
+    "telescope_pc_factor_mat_solver_type": "mumps",
+    "telescope_pc_factor_mat_mumps_icntl_14": ICNTL_14,
 }
 sp = lu
 
 # spatial parameters
-baseN = 100
+baseN = 128
 nref = 0
-mesh = PeriodicUnitSquareMesh(baseN, baseN)
+Lx = 3
+Ly = 1
+dp={"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
+mesh = PeriodicRectangleMesh(baseN, baseN, Lx, Ly, direction="x", distribution_parameters=dp)
 x, y = SpatialCoordinate(mesh)
 
 # spatial discretization
@@ -62,11 +77,8 @@ Vn = FunctionSpace(mesh, "DG", 0)
 
 # time 
 t = Constant(0) 
-T = 1.0
-dt = Constant(0.01)
-
-alpha = CellDiameter(mesh)
-    
+T = 10.0
+dt = Constant(0.1)
 
 # (u, P, u_b, w, B, E, j, H)
 Z = MixedFunctionSpace([Vc, Q, Vc, Q, Vd, Q, Q, Vc])
@@ -81,12 +93,16 @@ z_prev = Function(Z)
 def v_grad(x):
     return as_vector([-x.dx(1), x.dx(0)])
 
-# Biskamp-Welter-1989
-phi = cos(x + 1.4) + cos(y + 0.5)
-psi = cos(2 * x + 2.3) + cos(y + 4.1)
+lmbda = 10
+phi = 1/lmbda * ln(cosh(lmbda * (y - 0.5)))
+m = 1
+kx = 2*pi*m/Lx
+eps = 5e-2
+#del_psi = eps * cos(kx * x) * (1.0 / cosh(lmbda*(y-0.5))**2)
+del_psi = eps * sin(pi* y) * cos(2*pi/3 * x)
 
-u_init = v_grad(psi)
-B_init = v_grad(phi)
+u_init = as_vector([0, 0])
+B_init = v_grad(phi + del_psi)
  
 alpha = CellDiameter(mesh)
 # solve for u_b_init
@@ -98,8 +114,9 @@ def u_b_solver(u):
     a = inner(u_b, v) * dx + alpha**2 * inner(curl(u_b), curl(v)) * dx
     L = inner(u_init, v) * dx
     sp_ub = {  
-           "ksp_type":"gmres",
-           "pc_type": "ilu",
+           "ksp_type":"preonly",
+           "pc_type": "lu",
+           "pc_factor_mat_solver_type": "mumps",
     }
     bcs0 = [DirichletBC(Vc, 0, "on_boundary")]
     pb0 = LinearVariationalProblem(a, L, u_sol, bcs = bcs0)
@@ -107,7 +124,7 @@ def u_b_solver(u):
     solver0.solve()
     return u_sol
 
-u_b_init = u_b_solver(u_init)
+#u_b_init = u_b_solver(u_init)
 
 def project_ic(B_init):
     # Need to project the initial conditions
@@ -150,13 +167,10 @@ def project_ic(B_init):
  
     return zp.subfunctions[0]
 
-#z_prev.sub(0).interpolate(u_init)
-#z_prev.sub(4).interpolate(B_init)
 
 z_prev.sub(0).interpolate(u_init)
-#z_prev.sub(4).interpolate(project_ic(B_init))  # B component
-z_prev.sub(4).interpolate(B_init)  # B component
-#z_prev.sub(2).interpolate(u_b_init)
+#z_prev.sub(2).interpolate(u_b_init) 
+z_prev.sub(4).interpolate(B_init) 
 z.assign(z_prev)
 
 u_avg = (u + up)/2
@@ -174,6 +188,67 @@ def filter_term(u, u_b):
         u[0] * u_b[0].dx(1) + u[1] * u_b[1].dx(1) + u[2] * u_b[2].dx(1),  # i = 1 分量
         u[0] * u_b[0].dx(2) + u[1] * u_b[1].dx(2) + u[2] * u_b[2].dx(2),  # i = 2 分量
     ])
+
+def spectrum(u, B):
+    N = baseN
+    x = np.linspace(0, float(Lx), N, endpoint = False)
+    y = np.linspace(0, float(Ly), N, endpoint = False)
+    X, Y = np.meshgrid(x, y, indexing="ij")
+
+# uniform mesh for evaluation
+    u_vals = np.zeros((N, N, 2))
+    B_vals = np.zeros((N, N, 2))
+
+    for i in range(N):
+        for j in range(N):
+            u_vals[i, j, :] = u.at([x[i], y[j]])
+            B_vals[i, j, :] = B.at([x[i], y[j]])
+
+    uhat_x = np.fft.fftn(u_vals[:, :, 0])
+    uhat_y = np.fft.fftn(u_vals[:, :, 1])
+
+    Bhat_x = np.fft.fftn(B_vals[:, :, 0])
+    Bhat_y = np.fft.fftn(B_vals[:, :, 1])
+
+
+    kx = np.fft.fftfreq(N, d=2*np.pi/N) * 2*np.pi
+    ky = np.fft.fftfreq(N, d=2*np.pi/N) * 2*np.pi
+    KX, KY = np.meshgrid(kx, ky, indexing="ij")
+    K = np.sqrt(KX**2 + KY**2)
+
+
+    E_u_k = 0.5 * (np.abs(uhat_x)**2 + np.abs(uhat_y)**2)
+    E_B_k = 0.5 * (np.abs(Bhat_x)**2 + np.abs(Bhat_y)**2)
+
+
+    kmax = int(np.max(K))
+    E_u = np.zeros(kmax)
+    E_B = np.zeros(kmax)
+
+    for k in range(kmax):
+        mask = (K >= k) & (K < k+1)
+        E_u[k] = np.sum(E_u_k[mask])
+        E_B[k] = np.sum(E_B_k[mask])
+
+    import matplotlib.pyplot as plt
+
+    k = np.arange(1, len(E_u))
+
+    plt.figure()
+    plt.loglog(k, E_u[1:], '-', label='Kinetic')
+    plt.loglog(k, E_B[1:], '-.', label='Magnetic')
+
+    # 参考 k^{-5/3}
+    plt.loglog(k, 1e-2 * k**(-5/3), '--', label=r'$k^{-5/3}$')
+    plt.loglog(k, 1e-3 * k**(-3.0),  ':', label=r'$k^{-3}$')
+    
+    plt.xlabel(r'$k$')
+    plt.ylabel(r'$E(k)$')
+    plt.legend()
+    plt.grid(True, which="both")
+    plt.tight_layout()
+    plt.savefig("spectrum.png", dpi=300)
+    plt.close()  
 
 F = (
     # u
@@ -227,7 +302,7 @@ def helicity_m(B):
     # 2D is trivially 0
     return float(0)
 
-pb = NonlinearVariationalProblem(F, z)
+pb = NonlinearVariationalProblem(F, z, bcs)
 solver = NonlinearVariationalSolver(pb, solver_parameters = sp)
 
 timestep = 0
@@ -264,14 +339,14 @@ while (float(t) < float(T-dt)+1.0e-10):
     if mesh.comm.rank == 0:
         print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}", flush=True)
     solver.solve()
-    u_b = u_b_solver(z.sub(0)) 
+    
+    u_b = u_b_solver(z.sub(0)) # solve for u_b to make sure the energy at evaluated at the same time level 
     energy = energy_uB(z.sub(0),u_b, z.sub(4)) #u, u_b, B
     crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, u_b, B
     maghelicity = helicity_m(z.sub(4)) # B
     divu = div_u(z.sub(0))
     divB = div_B(z.sub(4))
-
-
+    
     if mesh.comm.rank == 0:
         row = {
         "t": float(t),
@@ -284,9 +359,12 @@ while (float(t) < float(T-dt)+1.0e-10):
         with open(data_filename, "a", newline='') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writerow(row)
+    if mesh.comm.rank == 0:
+        print(row)
+        if timestep == 10:
+            spectrum(z.sub(0), z.sub(4))
 
-    print(row) 
     pvd.write(*z.subfunctions, time=float(t))
     timestep += 1
     z_prev.assign(z)
-
+    timestep += 1

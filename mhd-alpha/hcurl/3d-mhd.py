@@ -84,20 +84,43 @@ alpha = CellDiameter(mesh)
 # solve for u_b_init
 def u_b_solver(u):
     u_init = Function(Vc).interpolate(u)
-    u_b = TrialFunction(Vc)
-    u_sol = Function(Vc)
+    u_b = Function(Vc)
     v = TestFunction(Vc)
-    a = inner(u_b, v) * dx + alpha**2 * inner(curl(u_b), curl(v)) * dx
-    L = inner(u_init, v) * dx
+    F = inner(u_b, v) * dx + alpha**2 * inner(curl(u_b), curl(v)) * dx - inner(u_init, v) * dx
     sp_ub = {  
            "ksp_type":"gmres",
            "pc_type": "ilu",
     }
+    sp_riesz = {
+         "mat_type": "nest",
+        "snes_type": "ksponly",
+        "snes_monitor": None,
+        "ksp_monitor": None,
+        "ksp_max_it": 1000,
+        "ksp_norm_type": "preconditioned",
+        "ksp_type": "minres",
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "mumps",
+        "ksp_atol": 1.0e-5,
+        "ksp_rtol": 1.0e-5,
+        "ksp_minres_nutol": 1E-8,
+        "ksp_convergence_test": "skip",
+
+    }
+    
+    def riesz_u_b(u, v):
+        return inner(u, v) * dx + alpha **2 * inner(curl(u), curl(v)) * dx
+    
+    u_b0 = TrialFunction(Vc)
+    u_b1 = TestFunction(Vc)
+    Jp_riesz = riesz_u_b(u_b0, u_b1)
+
     bcs0 = [DirichletBC(Vc, 0, "on_boundary")]
-    pb0 = LinearVariationalProblem(a, L, u_sol, bcs = bcs0)
-    solver0 = LinearVariationalSolver(pb0, solver_parameters = sp_ub)
+
+    pb0 = NonlinearVariationalProblem(F, u_b, bcs0, Jp = Jp_riesz)
+    solver0 = NonlinearVariationalSolver(pb0, solver_parameters = sp_riesz, options_prefix = "solve curlcurl for u_b") 
     solver0.solve()
-    return u_sol
+    return u_b
 
 u_b_init = u_b_solver(u_init)
 
