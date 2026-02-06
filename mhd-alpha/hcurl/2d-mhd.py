@@ -326,12 +326,22 @@ def helicity_m(B):
     # 2D is trivially 0
     return float(0)
 
+def norm_inf(u):
+    with u.dat.vec_ro as u_v:
+        u_max = u_v.norm(PETSc.NormType.INFINITY)
+    return u_max
+
+def compute_ens(w, j):
+    w_max=norm_inf(w)
+    j_max=norm_inf(j)
+    return w_max, j_max, float(w_max) + float(j_max) 
+
 pb = NonlinearVariationalProblem(F, z)
 solver = NonlinearVariationalSolver(pb, solver_parameters = sp)
 
 timestep = 0
 data_filename = "output/data.csv"
-fieldnames = ["t", "divu", "divB", "energy", "helicity_c", "helicity_m"]
+fieldnames = ["t", "divu", "divB", "energy", "helicity_c", "helicity_m", "ens_total", "w_max", "j_max"]
 
 if mesh.comm.rank == 0:
     with open(data_filename, "w", newline='') as f:
@@ -344,6 +354,8 @@ crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, u_b, B
 maghelicity = helicity_m(z.sub(4)) # B
 divu = div_u(z.sub(0))
 divB = div_B(z.sub(4))
+# monitor
+w_max, j_max, ens_total = compute_ens(z.sub(2), z.sub(6)) # w, j
 
 if mesh.comm.rank == 0:
     row = {
@@ -353,6 +365,9 @@ if mesh.comm.rank == 0:
         "energy": float(energy),
         "helicity_c": float(crosshelicity),
         "helicity_m": float(maghelicity),
+        "ens_total": float(ens_total),
+        "w_max": float(w_max), 
+        "j_max": float(j_max), 
     }
     with open(data_filename, "a", newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -371,6 +386,9 @@ while (float(t) < float(T-dt)+1.0e-10):
     maghelicity = helicity_m(z.sub(4)) # B
     divu = div_u(z.sub(0))
     divB = div_B(z.sub(4))
+    # monitor
+    w_max, j_max, ens_tol = compute_ens(z.sub(2), z.sub(6)) # w, j
+
 
 
     if mesh.comm.rank == 0:
@@ -381,6 +399,9 @@ while (float(t) < float(T-dt)+1.0e-10):
         "energy": float(energy),
         "helicity_c": float(crosshelicity),
         "helicity_m": float(maghelicity),
+        "ens_total": float(ens_total),
+        "w_max": float(w_max), 
+        "j_max": float(j_max), 
         }
         with open(data_filename, "a", newline='') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
