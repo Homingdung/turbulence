@@ -61,7 +61,7 @@ lu = {
 sp = lu
 
 # spatial parameters
-baseN = 64
+baseN = 100
 nref = 0
 Lx = 3
 Ly = 1
@@ -277,7 +277,7 @@ def spectrum(u, B):
     
     # 参考 k^{-5/3}
     plt.loglog(k, 5e-2 * k**(-5/3), '--', label=r'$k^{-5/3}$')
-    #plt.loglog(k, 5e-3 * k**(-11/3),  ':', label=r'$k^{-11/3}$')
+    plt.loglog(k, 5e-3 * k**(-3.0),  ':', label=r'$k^{-3}$')
     
     k_alpha = 1/ mesh_sizes(mesh)[0]
 
@@ -426,7 +426,7 @@ while (float(t) < float(T-dt)+1.0e-10):
             writer.writerow(row)
     if mesh.comm.rank == 0:
         print(row)
-        if timestep == 190:
+        if timestep == 25:
             spectrum(z.sub(0), z.sub(4))
 
     pvd.write(*z.subfunctions, time=float(t))
