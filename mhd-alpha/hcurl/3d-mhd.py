@@ -4,9 +4,10 @@ from firedrake import *
 import csv
 import numpy as np
 from mpi4py import MPI
+import matplotlib.pyplot as plt
 
-nu = Constant(0)
-eta = Constant(0)
+nu = Constant(1e-3)
+eta = Constant(1e-3)
 S = Constant(1)
 
 def helicity_c(u, B):
@@ -45,6 +46,8 @@ sp = lu
 baseN = 4
 nref = 0
 mesh = PeriodicUnitCubeMesh(baseN, baseN, baseN)
+mesh.coordinates.dat.data[:] *= 2 * pi
+
 x, y, z0 = SpatialCoordinate(mesh)
 
 # spatial discretization
@@ -72,15 +75,38 @@ z_prev = Function(Z)
 (ut, Pt, u_bt, wt, Bt, Et, jt, Ht) = split(z_test)
 (up, Pp, u_bp, wp, Bp, Ep, jp, Hp) = split(z_prev)
 
-# helicityhu ic
-u1 = -sin(pi*(x-1/2))*cos(pi*(y-1/2))*z0*(z0-1)
-u2 = cos(pi*(x-1/2))*sin(pi*(y-1/2))*z0*(z0-1)
-u_init = as_vector([u1, u2, 0])
-B1 = -sin(pi*x)*cos(pi*y)
-B2 = cos(pi*x)*sin(pi*y)
-B_init = as_vector([B1, B2, 0])
+# helicityhu ic sp test
+#u1 = -sin(pi*(x-1/2))*cos(pi*(y-1/2))*z0*(z0-1)
+#u2 = cos(pi*(x-1/2))*sin(pi*(y-1/2))*z0*(z0-1)
+#u_init = as_vector([u1, u2, 0])
+##B1 = -sin(pi*x)*cos(pi*y)
+#B2 = cos(pi*x)*sin(pi*y)
+#B_init = as_vector([B1, B2, 0])
+
+# ABC flow
+A0 = Constant(1)
+B0 = Constant(1)
+C0 = Constant(1)
+u1 = A0 * sin(z0) + C0 * cos(y)
+u2 = B0 * sin(x) + A0 * cos(z0)
+u3 = C0 * sin(y) + B0 * cos(x)
+
+u_init = as_vector([u1, u2, u3])
+B_init = as_vector([u1, u2, u3])
 
 alpha = CellDiameter(mesh)
+
+# compute the value of meshsize alpha
+def mesh_sizes(mh):
+     mesh_size = []
+     for msh in mh:
+         DG0 = FunctionSpace(msh, "DG", 0)
+         h = Function(DG0).interpolate(CellDiameter(msh))
+         with h.dat.vec as hvec:
+             _, maxh = hvec.max()
+         mesh_size.append(maxh)
+     return mesh_size
+
 # solve for u_b_init
 def u_b_solver(u):
     u_init = Function(Vc).interpolate(u)
@@ -189,6 +215,85 @@ def filter_term(u, u_b):
         u[0] * u_b[0].dx(2) + u[1] * u_b[1].dx(2) + u[2] * u_b[2].dx(2),  # i = 2 分量
     ])
 
+def spectrum(u, B):
+    N = baseN
+    x = np.linspace(0, 2 * np.pi, N, endpoint = False)
+    y = np.linspace(0, 2 * np.pi, N, endpoint = False)
+    z = np.linspace(0, 2 * np.pi, N, endpoint = False)
+
+    # uniform mesh for evaluation
+    u_vals = np.zeros((N, N, N, 3))
+    B_vals = np.zeros((N, N, N, 3))
+
+    for i in range(N):
+        xi = x[i]
+        for j in range(N):
+            yj = y[j]
+            for k in range(N):
+                zk = z[k]
+                u_vals[i, j, k, :] = u.at([xi, yj, zk])
+                B_vals[i, j, k, :] = B.at([xi, yj, zk])
+    
+    # --- FIXED: compute 3D FFTs for each component (use full 3D slices) ---
+    uhat_x = np.fft.fftn(u_vals[:, :, :, 0])
+    uhat_y = np.fft.fftn(u_vals[:, :, :, 1])
+    uhat_z = np.fft.fftn(u_vals[:, :, :, 2])
+
+    Bhat_x = np.fft.fftn(B_vals[:, :, :, 0])
+    Bhat_y = np.fft.fftn(B_vals[:, :, :, 1])
+    Bhat_z = np.fft.fftn(B_vals[:, :, :, 2])
+
+    # wave-number grid for domain [0, 2*pi]^3
+    # spacing is d = 2*pi/N, so fftfreq(N, d=2*pi/N) and *2*pi gives angular wavenumbers
+    kx = np.fft.fftfreq(N, d=2*np.pi/N) * 2*np.pi
+    ky = np.fft.fftfreq(N, d=2*np.pi/N) * 2*np.pi
+    kz = np.fft.fftfreq(N, d=2*np.pi/N) * 2*np.pi
+    KX, KY, KZ = np.meshgrid(kx, ky, kz, indexing="ij")
+    K = np.sqrt(KX**2 + KY**2 + KZ**2)
+
+    # energy per Fourier mode (note: no Parseval normalization applied here,
+    # keep same convention as your original code)
+    E_u_k = 0.5 * (np.abs(uhat_x)**2 + np.abs(uhat_y)**2 + np.abs(uhat_z)**2)
+    E_B_k = 0.5 * (np.abs(Bhat_x)**2 + np.abs(Bhat_y)**2 + np.abs(Bhat_z)**2)
+
+    # maximum integer shell index
+    kmax = int(np.max(K))
+    E_u = np.zeros(kmax+1)   # make length kmax+1 so indexes 0..kmax valid
+    E_B = np.zeros(kmax+1)
+
+    # sum energy in integer-width radial shells [k, k+1)
+    for kk in range(kmax+1):
+        mask = (K >= kk) & (K < kk+1)
+        # mask and E_u_k now have same shape (N,N,N) so indexing is valid
+        E_u[kk] = np.sum(E_u_k[mask])
+        E_B[kk] = np.sum(E_B_k[mask])
+
+    # prepare k array starting from 1 (skip k=0 mean)
+    k = np.arange(1, len(E_u))
+
+    plt.figure()
+    plt.loglog(k, E_u[1:], '-', label='Kinetic')
+    plt.loglog(k, E_B[1:], '-.', label='Magnetic')
+    plt.loglog(k, E_B[1:] + E_u[1:], '--', label='TotalEnergy')
+    
+    # 参考谱
+    plt.loglog(k, 5e-2 * k**(-5/3), '--', label=r'$k^{-5/3}$')
+    plt.loglog(k, 5e-3 * k**(-3.0),  ':', label=r'$k^{-3}$')
+    
+    # k_alpha: 保留你原来的 mesh_sizes 用法（若未定义请按需要替换）
+    k_alpha = 1/ mesh_sizes(mesh)[0]
+
+    plt.axvline(k_alpha, linestyle='-', color='red', linewidth=2.0,
+            label=r'$k = 2\pi/\alpha$')
+    
+    plt.xlabel(r'$k$')
+    plt.ylabel(r'$E(k)$')
+    plt.legend()
+    plt.grid(True, which="both")
+    plt.tight_layout()
+    plt.savefig("spectrum.png", dpi=300)
+    plt.close()
+
 F = (
     # u
      inner((u - up)/dt, ut) * dx
@@ -252,12 +357,22 @@ def helicity_m(B):
     solver_curl.solve()
     return assemble(inner(A, B)*dx)
 
+def norm_inf(u):
+    with u.dat.vec_ro as u_v:
+        u_max = u_v.norm(PETSc.NormType.INFINITY)
+    return u_max
+
+def compute_ens(w, j):
+    w_max=norm_inf(w)
+    j_max=norm_inf(j)
+    return w_max, j_max, float(w_max) + float(j_max) 
+
 pb = NonlinearVariationalProblem(F, z)
 solver = NonlinearVariationalSolver(pb, solver_parameters = sp)
 
 timestep = 0
 data_filename = "output/data.csv"
-fieldnames = ["t", "divu", "divB", "energy", "helicity_c", "helicity_m"]
+fieldnames = ["t", "divu", "divB", "energy", "helicity_c", "helicity_m", "ens_total", "w_max", "j_max"]
 
 if mesh.comm.rank == 0:
     with open(data_filename, "w", newline='') as f:
@@ -270,6 +385,8 @@ crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, u_b, B
 maghelicity = helicity_m(z.sub(4)) # B
 divu = div_u(z.sub(0))
 divB = div_B(z.sub(4))
+# monitor
+w_max, j_max, ens_total = compute_ens(z.sub(2), z.sub(6)) # w, j
 
 if mesh.comm.rank == 0:
     row = {
@@ -279,6 +396,9 @@ if mesh.comm.rank == 0:
         "energy": float(energy),
         "helicity_c": float(crosshelicity),
         "helicity_m": float(maghelicity),
+        "ens_total": float(ens_total),
+        "w_max": float(w_max), 
+        "j_max": float(j_max), 
     }
     with open(data_filename, "a", newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -286,8 +406,10 @@ if mesh.comm.rank == 0:
 
 while (float(t) < float(T-dt)+1.0e-10):
     t.assign(t+dt)
+    dofs = Z.dim()
+    dofs_per_core = dofs / COMM_WORLD.size
     if mesh.comm.rank == 0:
-        print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}", flush=True)
+        print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}, dofs = {dofs}, dofs_per_core = {dofs_per_core}", flush=True)
     solver.solve()
     u_b = u_b_solver(z.sub(0)) 
     energy = energy_uB(z.sub(0),u_b, z.sub(4)) #u, u_b, B
@@ -295,6 +417,9 @@ while (float(t) < float(T-dt)+1.0e-10):
     maghelicity = helicity_m(z.sub(4)) # B
     divu = div_u(z.sub(0))
     divB = div_B(z.sub(4))
+    # monitor
+    w_max, j_max, ens_tol = compute_ens(z.sub(2), z.sub(6)) # w, j
+
 
 
     if mesh.comm.rank == 0:
@@ -305,13 +430,18 @@ while (float(t) < float(T-dt)+1.0e-10):
         "energy": float(energy),
         "helicity_c": float(crosshelicity),
         "helicity_m": float(maghelicity),
+        "ens_total": float(ens_total),
+        "w_max": float(w_max), 
+        "j_max": float(j_max), 
         }
         with open(data_filename, "a", newline='') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writerow(row)
     if mesh.comm.rank == 0:
         print(row)
- 
+        if timestep == 2:
+            spectrum(z.sub(0), z.sub(4))
+
     pvd.write(*z.subfunctions, time=float(t))
     timestep += 1
     z_prev.assign(z)
