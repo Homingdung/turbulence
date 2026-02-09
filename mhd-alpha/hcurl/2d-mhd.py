@@ -61,7 +61,7 @@ lu = {
 sp = lu
 
 # spatial parameters
-baseN = 100
+baseN = 64
 nref = 0
 Lx = 3
 Ly = 1
@@ -108,6 +108,18 @@ u_init = v_grad(psi)
 B_init = v_grad(phi)
   
 alpha = CellDiameter(mesh)
+
+# compute the value of meshsize alpha
+def mesh_sizes(mh):
+     mesh_size = []
+     for msh in mh:
+         DG0 = FunctionSpace(msh, "DG", 0)
+         h = Function(DG0).interpolate(CellDiameter(msh))
+         with h.dat.vec as hvec:
+             _, maxh = hvec.max()
+         mesh_size.append(maxh)
+     return mesh_size
+
 # solve for u_b_init
 def u_b_solver(u):
     u_init = Function(Vc).interpolate(u)
@@ -263,8 +275,13 @@ def spectrum(u, B):
     plt.loglog(k, E_B[1:], '-.', label='Magnetic')
 
     # 参考 k^{-5/3}
-    plt.loglog(k, 1e-2 * k**(-5/3), '--', label=r'$k^{-5/3}$')
-    #plt.loglog(k, 1e-3 * k**(-3.0),  ':', label=r'$k^{-3}$')
+    plt.loglog(k, 5e-2 * k**(-5/3), '--', label=r'$k^{-5/3}$')
+    plt.loglog(k, 5e-3 * k**(-11/3),  ':', label=r'$k^{-11/3}$')
+    
+    k_alpha = 1/ mesh_sizes(mesh)[0]
+
+    plt.axvline(k_alpha, linestyle='-', color='red', linewidth=2.0,
+            label=r'$k = 2\pi/\alpha$')
     
     plt.xlabel(r'$k$')
     plt.ylabel(r'$E(k)$')
@@ -408,7 +425,7 @@ while (float(t) < float(T-dt)+1.0e-10):
             writer.writerow(row)
     if mesh.comm.rank == 0:
         print(row)
-        if timestep == 10:
+        if timestep == 190:
             spectrum(z.sub(0), z.sub(4))
 
     pvd.write(*z.subfunctions, time=float(t))
