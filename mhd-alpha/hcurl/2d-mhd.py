@@ -273,10 +273,11 @@ def spectrum(u, B):
     plt.figure()
     plt.loglog(k, E_u[1:], '-', label='Kinetic')
     plt.loglog(k, E_B[1:], '-.', label='Magnetic')
-
+    plt.loglog(k, E_B[1:] + E_u[1:], '--', label='TotalEnergy')
+    
     # 参考 k^{-5/3}
     plt.loglog(k, 5e-2 * k**(-5/3), '--', label=r'$k^{-5/3}$')
-    plt.loglog(k, 5e-3 * k**(-11/3),  ':', label=r'$k^{-11/3}$')
+    #plt.loglog(k, 5e-3 * k**(-11/3),  ':', label=r'$k^{-11/3}$')
     
     k_alpha = 1/ mesh_sizes(mesh)[0]
 
