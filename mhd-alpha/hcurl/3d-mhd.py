@@ -209,32 +209,36 @@ w_avg = w
 E_avg = E
 
 
-def spectrum_and_save(u, B, tval,
+
+def spectrum_and_save(u, A, B, tval,
                       save_dir="output",
                       aggregate_filename="spectrum_all.csv",
                       per_timestep_files=True):
     """
-    计算谱并保存为 CSV。
-    - u, B: Function (2D vector) at current time
-    - tval: 当前时间（float）
-    - save_dir: 输出目录
-    - aggregate_filename: 所有时间并成一张长表时的文件名（在 save_dir 下）
-    - per_timestep_files: 是否为每一步写单独文件
-    返回：k (1..kmax-1), E_u[1:], E_B[1:]
+    计算动能谱 E_u(k)、磁能谱 E_B(k) 和磁螺度谱 H(k)，并保存为 CSV。
+    输入:
+      - u, A, B: 三个场函数对象，支持 .at([x,y,z]) 返回长度-3向量
+      - tval: 当前时间（float）
+    输出:
+      返回 (k_arr, E_u[1:], E_B[1:], H_spec[1:])
+    约定:
+      - 使用与原来相同的 FFT/归一化约定（未额外除以 N**3 或体积）
+      - 谱按整数壳 [k, k+1) 累加，跳过 k=0
     """
-    # 只让主进程写文件（调用处应保证仅 rank 0 调用或在这里再判定）
+    # 只让主进程写文件
     rank = mesh.comm.rank
     if rank != 0:
         return None
 
     N = baseN
-    x = np.linspace(0, 2 * np.pi, N, endpoint = False)
-    y = np.linspace(0, 2 * np.pi, N, endpoint = False)
-    z = np.linspace(0, 2 * np.pi, N, endpoint = False)
+    x = np.linspace(0, 2 * np.pi, N, endpoint=False)
+    y = np.linspace(0, 2 * np.pi, N, endpoint=False)
+    z = np.linspace(0, 2 * np.pi, N, endpoint=False)
 
-    # uniform mesh for evaluation
-    u_vals = np.zeros((N, N, N, 3))
-    B_vals = np.zeros((N, N, N, 3))
+    # allocate arrays
+    u_vals = np.zeros((N, N, N, 3), dtype=float)
+    A_vals = np.zeros((N, N, N, 3), dtype=float)
+    B_vals = np.zeros((N, N, N, 3), dtype=float)
 
     for i in range(N):
         xi = x[i]
@@ -243,70 +247,85 @@ def spectrum_and_save(u, B, tval,
             for k in range(N):
                 zk = z[k]
                 u_vals[i, j, k, :] = u.at([xi, yj, zk])
+                A_vals[i, j, k, :] = A.at([xi, yj, zk])
                 B_vals[i, j, k, :] = B.at([xi, yj, zk])
-    
-    # --- FIXED: compute 3D FFTs for each component (use full 3D slices) ---
+
+    # FFT per component
     uhat_x = np.fft.fftn(u_vals[:, :, :, 0])
     uhat_y = np.fft.fftn(u_vals[:, :, :, 1])
     uhat_z = np.fft.fftn(u_vals[:, :, :, 2])
+
+    Ahat_x = np.fft.fftn(A_vals[:, :, :, 0])
+    Ahat_y = np.fft.fftn(A_vals[:, :, :, 1])
+    Ahat_z = np.fft.fftn(A_vals[:, :, :, 2])
 
     Bhat_x = np.fft.fftn(B_vals[:, :, :, 0])
     Bhat_y = np.fft.fftn(B_vals[:, :, :, 1])
     Bhat_z = np.fft.fftn(B_vals[:, :, :, 2])
 
-    # wave-number grid for domain [0, 2*pi]^3
-    # spacing is d = 2*pi/N, so fftfreq(N, d=2*pi/N) and *2*pi gives angular wavenumbers
+    # wave-number grid for domain [0, 2*pi]^3 (same as earlier)
     kx = np.fft.fftfreq(N, d=2*np.pi/N) * 2*np.pi
     ky = np.fft.fftfreq(N, d=2*np.pi/N) * 2*np.pi
     kz = np.fft.fftfreq(N, d=2*np.pi/N) * 2*np.pi
     KX, KY, KZ = np.meshgrid(kx, ky, kz, indexing="ij")
     K = np.sqrt(KX**2 + KY**2 + KZ**2)
 
-    # energy per Fourier mode (note: no Parseval normalization applied here,
-    # keep same convention as your original code)
+    # modal energies (保持与你原代码相同的因子 0.5)
     E_u_k = 0.5 * (np.abs(uhat_x)**2 + np.abs(uhat_y)**2 + np.abs(uhat_z)**2)
     E_B_k = 0.5 * (np.abs(Bhat_x)**2 + np.abs(Bhat_y)**2 + np.abs(Bhat_z)**2)
 
-    # maximum integer shell index
-    kmax = int(np.max(K))
-    E_u = np.zeros(kmax+1)   # make length kmax+1 so indexes 0..kmax valid
-    E_B = np.zeros(kmax+1)
+    # 磁螺度模态：Re( Ahat · conj(Bhat) )
+    H_mode = np.real(Ahat_x * np.conj(Bhat_x) +
+                     Ahat_y * np.conj(Bhat_y) +
+                     Ahat_z * np.conj(Bhat_z))
 
-    # sum energy in integer-width radial shells [k, k+1)
-    for kk in range(kmax+1):
-        mask = (K >= kk) & (K < kk+1)
-        # mask and E_u_k now have same shape (N,N,N) so indexing is valid
+    # 最大整数壳
+    kmax = int(np.max(K))
+    E_u = np.zeros(kmax + 1)
+    E_B = np.zeros(kmax + 1)
+    H_spec = np.zeros(kmax + 1)
+
+    for kk in range(kmax + 1):
+        mask = (K >= kk) & (K < kk + 1)
         E_u[kk] = np.sum(E_u_k[mask])
         E_B[kk] = np.sum(E_B_k[mask])
+        H_spec[kk] = np.sum(H_mode[mask])
 
-    # k 从 1 开始起意义更强（跳过 k=0 的总量）
+    # 跳过 k=0（常规做法）
     k_arr = np.arange(1, len(E_u))
 
     # prepare output dir
     os.makedirs(save_dir, exist_ok=True)
 
-    # 每时间步单文件（可选择关闭）
+    # per-timestep file
     if per_timestep_files:
         fname = os.path.join(save_dir, f"spectrum_t={tval:.6f}.csv")
         with open(fname, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["k", "E_u", "E_B", "E_total", "t"])
+            writer.writerow(["k", "E_u", "E_B", "H_k", "t"])
             for kk in k_arr:
-                writer.writerow([int(kk), float(E_u[kk]), float(E_B[kk]), float(E_u[kk] + E_B[kk]), float(tval)])
+                writer.writerow([int(kk),
+                                 float(E_u[kk]),
+                                 float(E_B[kk]),
+                                 float(H_spec[kk]),
+                                 float(tval)])
 
-    # 追加到汇总长表（按行存 t,k,E_u,E_B）
+    # append to aggregate file
     agg_path = os.path.join(save_dir, aggregate_filename)
     file_exists = os.path.exists(agg_path)
     with open(agg_path, "a", newline="") as f:
         writer = csv.writer(f)
         if not file_exists:
-            writer.writerow(["t", "k", "E_u", "E_B", "E_total"])
+            writer.writerow(["t", "k", "E_u", "E_B", "H_k", "E_total"])
         for kk in k_arr:
-            writer.writerow([float(tval), int(kk), float(E_u[kk]), float(E_B[kk]), float(E_u[kk] + E_B[kk])])
+            writer.writerow([float(tval),
+                             int(kk),
+                             float(E_u[kk]),
+                             float(E_B[kk]),
+                             float(H_spec[kk]),
+                             float(E_u[kk] + E_B[kk])])
 
-    # 返回便于进一步处理
-    return k_arr, E_u[1:], E_B[1:]
-
+    return k_arr, E_u[1:], E_B[1:], H_spec[1:]
 F = (
     # u
      inner((u - up)/dt, ut) * dx
@@ -368,7 +387,7 @@ def helicity_m(B):
     pb_curl = NonlinearVariationalProblem(F_curl, A, bcs_curl)
     solver_curl= NonlinearVariationalSolver(pb_curl, solver_parameters = sp, options_prefix = "solver_curlcurl")
     solver_curl.solve()
-    return assemble(inner(A, B)*dx)
+    return A, assemble(inner(A, B)*dx)
 
 def norm_inf(u):
     with u.dat.vec_ro as u_v:
@@ -405,7 +424,7 @@ if mesh.comm.rank == 0:
 u_b = u_b_solver(z_prev.sub(0))
 energy = energy_uB(z_prev.sub(0),u_b, z_prev.sub(4)) #u, u_b, B
 crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, u_b, B
-maghelicity = helicity_m(z.sub(4)) # B
+A_fn, maghelicity = helicity_m(z.sub(4)) # B
 divu = div_u(z.sub(0))
 divB = div_B(z.sub(4))
 # monitor
@@ -437,7 +456,7 @@ while (float(t) < float(T-dt)+1.0e-10):
     u_b = u_b_solver(z.sub(0)) 
     energy = energy_uB(z.sub(0),u_b, z.sub(4)) #u, u_b, B
     crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, u_b, B
-    maghelicity = helicity_m(z.sub(4)) # B
+    A_fn, maghelicity = helicity_m(z.sub(4)) # B
     divu = div_u(z.sub(0))
     divB = div_B(z.sub(4))
     # monitor
@@ -464,7 +483,7 @@ while (float(t) < float(T-dt)+1.0e-10):
         print(row)
     
     if mesh.comm.rank == 0:
-        spectrum_and_save(z.sub(0), z.sub(4), float(t))  # 会写 CSV 并存图
+        spectrum_and_save(z.sub(0), A_fn, z.sub(4), float(t))  # 会写 CSV 并存图
     pvd.write(*z.subfunctions, time=float(t))
     timestep += 1
     z_prev.assign(z)

@@ -27,6 +27,7 @@ k = df_t["k"].values
 E_u = df_t["E_u"].values
 E_B = df_t["E_B"].values
 E_tot = df_t["E_total"].values
+H_k = df_t["H_k"].values
 
 # ====== 4. 读 k_alpha ======
 mesh_info = pd.read_csv(mesh_info_path)
@@ -37,6 +38,7 @@ plt.figure(figsize=(6,4))
 plt.loglog(k, E_u, label="Kinetic")
 plt.loglog(k, E_B, label="Magnetic")
 plt.loglog(k, E_tot, "--", label="Total")
+plt.loglog(k, H_k, "-", label="MagneticHelicity")
 
 # ---- k^{-5/3} 参考线（对齐中间波数）----
 k0 = k[len(k)//2]
