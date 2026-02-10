@@ -215,15 +215,24 @@ def spectrum_and_save(u, A, B, tval,
                       aggregate_filename="spectrum_all.csv",
                       per_timestep_files=True):
     """
-    计算动能谱 E_u(k)、磁能谱 E_B(k) 和磁螺度谱 H(k)，并保存为 CSV。
+    计算并保存：
+      - 动能谱 E_u(k)
+      - 磁能谱 E_B(k)
+      - 磁螺度谱 H_mag(k) (来自 A 与 B)
+      - 交叉螺度谱 H_cross(k) (来自 u 与 B)
     输入:
       - u, A, B: 三个场函数对象，支持 .at([x,y,z]) 返回长度-3向量
       - tval: 当前时间（float）
     输出:
-      返回 (k_arr, E_u[1:], E_B[1:], H_spec[1:])
-    约定:
-      - 使用与原来相同的 FFT/归一化约定（未额外除以 N**3 或体积）
-      - 谱按整数壳 [k, k+1) 累加，跳过 k=0
+      返回 (k_arr, E_u[1:], E_B[1:], H_mag[1:], H_cross[1:])
+    说明:
+      - 每模态定义:
+          E_u_mode = 0.5 * |û|^2,  E_B_mode = 0.5 * |B̂|^2
+          H_mag_mode = Re( Â · conj(B̂) )
+          H_cross_mode = Re( û · conj(B̂) )
+      - 谱按整数壳 [k, k+1) 累加，跳过 k=0。
+      - 未额外除以 N**3 或体积；如需归一化请告诉我。
+      - 磁螺度依赖于 A 的 gauge（请确认 A 的规范）。
     """
     # 只让主进程写文件
     rank = mesh.comm.rank
@@ -235,7 +244,7 @@ def spectrum_and_save(u, A, B, tval,
     y = np.linspace(0, 2 * np.pi, N, endpoint=False)
     z = np.linspace(0, 2 * np.pi, N, endpoint=False)
 
-    # allocate arrays
+    # allocate arrays for sampling
     u_vals = np.zeros((N, N, N, 3), dtype=float)
     A_vals = np.zeros((N, N, N, 3), dtype=float)
     B_vals = np.zeros((N, N, N, 3), dtype=float)
@@ -250,7 +259,7 @@ def spectrum_and_save(u, A, B, tval,
                 A_vals[i, j, k, :] = A.at([xi, yj, zk])
                 B_vals[i, j, k, :] = B.at([xi, yj, zk])
 
-    # FFT per component
+    # Fourier transforms (component-wise)
     uhat_x = np.fft.fftn(u_vals[:, :, :, 0])
     uhat_y = np.fft.fftn(u_vals[:, :, :, 1])
     uhat_z = np.fft.fftn(u_vals[:, :, :, 2])
@@ -263,69 +272,78 @@ def spectrum_and_save(u, A, B, tval,
     Bhat_y = np.fft.fftn(B_vals[:, :, :, 1])
     Bhat_z = np.fft.fftn(B_vals[:, :, :, 2])
 
-    # wave-number grid for domain [0, 2*pi]^3 (same as earlier)
+    # wave-number grid for domain [0, 2*pi]^3 (same convention)
     kx = np.fft.fftfreq(N, d=2*np.pi/N) * 2*np.pi
     ky = np.fft.fftfreq(N, d=2*np.pi/N) * 2*np.pi
     kz = np.fft.fftfreq(N, d=2*np.pi/N) * 2*np.pi
     KX, KY, KZ = np.meshgrid(kx, ky, kz, indexing="ij")
     K = np.sqrt(KX**2 + KY**2 + KZ**2)
 
-    # modal energies (保持与你原代码相同的因子 0.5)
+    # modal energies (0.5 factor retained)
     E_u_k = 0.5 * (np.abs(uhat_x)**2 + np.abs(uhat_y)**2 + np.abs(uhat_z)**2)
     E_B_k = 0.5 * (np.abs(Bhat_x)**2 + np.abs(Bhat_y)**2 + np.abs(Bhat_z)**2)
 
-    # 磁螺度模态：Re( Ahat · conj(Bhat) )
-    H_mode = np.real(Ahat_x * np.conj(Bhat_x) +
-                     Ahat_y * np.conj(Bhat_y) +
-                     Ahat_z * np.conj(Bhat_z))
+    # magnetic helicity per mode: Re( Ahat · conj(Bhat) )
+    H_mag_mode = np.real(Ahat_x * np.conj(Bhat_x) +
+                         Ahat_y * np.conj(Bhat_y) +
+                         Ahat_z * np.conj(Bhat_z))
 
-    # 最大整数壳
+    # cross helicity per mode: Re( uhat · conj(Bhat) )
+    H_cross_mode = np.real(uhat_x * np.conj(Bhat_x) +
+                           uhat_y * np.conj(Bhat_y) +
+                           uhat_z * np.conj(Bhat_z))
+
+    # shell sums
     kmax = int(np.max(K))
     E_u = np.zeros(kmax + 1)
     E_B = np.zeros(kmax + 1)
-    H_spec = np.zeros(kmax + 1)
+    H_mag_spec = np.zeros(kmax + 1)
+    H_cross_spec = np.zeros(kmax + 1)
 
     for kk in range(kmax + 1):
         mask = (K >= kk) & (K < kk + 1)
         E_u[kk] = np.sum(E_u_k[mask])
         E_B[kk] = np.sum(E_B_k[mask])
-        H_spec[kk] = np.sum(H_mode[mask])
+        H_mag_spec[kk] = np.sum(H_mag_mode[mask])
+        H_cross_spec[kk] = np.sum(H_cross_mode[mask])
 
-    # 跳过 k=0（常规做法）
+    # skip k=0
     k_arr = np.arange(1, len(E_u))
 
     # prepare output dir
     os.makedirs(save_dir, exist_ok=True)
 
-    # per-timestep file
+    # per-timestep file (包含所有谱列)
     if per_timestep_files:
         fname = os.path.join(save_dir, f"spectrum_t={tval:.6f}.csv")
         with open(fname, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["k", "E_u", "E_B", "H_k", "t"])
+            writer.writerow(["k", "E_u", "E_B", "H_mag", "H_cross", "t"])
             for kk in k_arr:
                 writer.writerow([int(kk),
                                  float(E_u[kk]),
                                  float(E_B[kk]),
-                                 float(H_spec[kk]),
+                                 float(H_mag_spec[kk]),
+                                 float(H_cross_spec[kk]),
                                  float(tval)])
 
-    # append to aggregate file
+    # append to aggregate file (追加 H_cross)
     agg_path = os.path.join(save_dir, aggregate_filename)
     file_exists = os.path.exists(agg_path)
     with open(agg_path, "a", newline="") as f:
         writer = csv.writer(f)
         if not file_exists:
-            writer.writerow(["t", "k", "E_u", "E_B", "H_k", "E_total"])
+            writer.writerow(["t", "k", "E_u", "E_B", "H_mag", "H_cross", "E_total"])
         for kk in k_arr:
             writer.writerow([float(tval),
                              int(kk),
                              float(E_u[kk]),
                              float(E_B[kk]),
-                             float(H_spec[kk]),
+                             float(H_mag_spec[kk]),
+                             float(H_cross_spec[kk]),
                              float(E_u[kk] + E_B[kk])])
 
-    return k_arr, E_u[1:], E_B[1:], H_spec[1:]
+    return k_arr, E_u[1:], E_B[1:], H_mag_spec[1:], H_cross_spec[1:]
 F = (
     # u
      inner((u - up)/dt, ut) * dx
