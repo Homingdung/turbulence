@@ -1,5 +1,4 @@
-
-# plot_spectrum.py
+# plot helicity spectrum.py
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
@@ -36,17 +35,13 @@ k_alpha = mesh_info["k_alpha"].iloc[0]
 
 # ====== 5. 画 spectrum ======
 plt.figure(figsize=(6,4))
-plt.loglog(k, E_u, label="Kinetic")
-plt.loglog(k, E_B, label="Magnetic")
-plt.loglog(k, E_tot, "--", label="Total")
-#plt.plot(k, H_mag, "-", label="MagneticHelicity")
-#plt.plot(k, H_cross, "-", label="CrossHelicity")
+plt.plot(k, H_mag, "-", label="MagneticHelicity")
+plt.plot(k, H_cross, "-", label="CrossHelicity")
 
 # ---- k^{-5/3} 参考线（对齐中间波数）----
 k0 = k[len(k)//2]
 C = E_tot[len(k)//2] * (k0**(5/3))
-plt.loglog(k, C * k**(-5/3), ":", linewidth=2,
-           label=r"$k^{-5/3}$")
+#plt.loglog(k, C * k**(-5/3), ":", linewidth=2,label=r"$k^{-5/3}$")
 
 # ---- k_alpha 竖线 ----
 plt.axvline(
