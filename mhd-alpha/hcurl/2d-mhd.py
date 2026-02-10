@@ -220,21 +220,19 @@ H_avg = H
 w_avg = w
 E_avg = E
 
-
 def spectrum_and_save(u, B, tval,
                       save_dir="output",
                       aggregate_filename="spectrum_all.csv",
                       per_timestep_files=True):
     """
-    计算谱并保存为 CSV。
-    - u, B: Function (2D vector) at current time
+    计算谱并保存为 CSV，增加 cross helicity 谱。
+    - u, B: Function (2D vector) at current time, 支持 .at([x,y])
     - tval: 当前时间（float）
-    - save_dir: 输出目录
-    - aggregate_filename: 所有时间并成一张长表时的文件名（在 save_dir 下）
-    - per_timestep_files: 是否为每一步写单独文件
-    返回：k (1..kmax-1), E_u[1:], E_B[1:]
+    - save_dir, aggregate_filename, per_timestep_files: 同原来
+    返回：k (1..kmax-1), E_u[1:], E_B[1:], H_cross[1:]
+    注意：保持原有 FFT / 归一化 约定（未除以 N**2 或体积）。
     """
-    # 只让主进程写文件（调用处应保证仅 rank 0 调用或在这里再判定）
+    # 只让主进程写文件
     rank = mesh.comm.rank
     if rank != 0:
         return None
@@ -244,66 +242,91 @@ def spectrum_and_save(u, B, tval,
     y = np.linspace(0, 2 * np.pi, N, endpoint=False)
 
     # 采样并做 FFT
-    u_vals = np.zeros((N, N, 2))
-    B_vals = np.zeros((N, N, 2))
+    u_vals = np.zeros((N, N, 2), dtype=float)
+    B_vals = np.zeros((N, N, 2), dtype=float)
 
     for i in range(N):
+        xi = x[i]
         for j in range(N):
-            u_vals[i, j, :] = u.at([x[i], y[j]])
-            B_vals[i, j, :] = B.at([x[i], y[j]])
+            yj = y[j]
+            u_vals[i, j, :] = u.at([xi, yj])
+            B_vals[i, j, :] = B.at([xi, yj])
 
+    # 组件 FFT（注意：二维场，但仍用 fftn）
     uhat_x = np.fft.fftn(u_vals[:, :, 0])
     uhat_y = np.fft.fftn(u_vals[:, :, 1])
 
     Bhat_x = np.fft.fftn(B_vals[:, :, 0])
     Bhat_y = np.fft.fftn(B_vals[:, :, 1])
 
-
+    # 波数网格（与原来一致）
     kx = np.fft.fftfreq(N, d=2*np.pi/N) * 2*np.pi
     ky = np.fft.fftfreq(N, d=2*np.pi/N) * 2*np.pi
     KX, KY = np.meshgrid(kx, ky, indexing="ij")
     K = np.sqrt(KX**2 + KY**2)
 
-
+    # modal energies
     E_u_k = 0.5 * (np.abs(uhat_x)**2 + np.abs(uhat_y)**2)
     E_B_k = 0.5 * (np.abs(Bhat_x)**2 + np.abs(Bhat_y)**2)
 
+    # cross helicity per mode: Re( û · conj(B̂) )
+    H_cross_mode = np.real(uhat_x * np.conj(Bhat_x) + uhat_y * np.conj(Bhat_y))
+
+    # 壳累加
     kmax = int(np.max(K)) + 1
-    E_u = np.zeros(kmax)
-    E_B = np.zeros(kmax)
+    E_u = np.zeros(kmax, dtype=float)
+    E_B = np.zeros(kmax, dtype=float)
+    H_cross = np.zeros(kmax, dtype=float)
 
     for kk in range(kmax):
-        mask = (K >= kk) & (K < kk+1)
-        E_u[kk] = np.sum(E_u_k[mask])
-        E_B[kk] = np.sum(E_B_k[mask])
+        mask = (K >= kk) & (K < kk + 1)
+        if np.any(mask):
+            E_u[kk] = np.sum(E_u_k[mask])
+            E_B[kk] = np.sum(E_B_k[mask])
+            H_cross[kk] = np.sum(H_cross_mode[mask])
+        else:
+            # 没有模式也保持 0
+            E_u[kk] = 0.0
+            E_B[kk] = 0.0
+            H_cross[kk] = 0.0
 
-    # k 从 1 开始起意义更强（跳过 k=0 的总量）
+    # k 从 1 开始更有意义（跳过 k=0）
     k_arr = np.arange(1, len(E_u))
 
     # prepare output dir
     os.makedirs(save_dir, exist_ok=True)
 
-    # 每时间步单文件（可选择关闭）
+    # 每时间步单文件（包含 H_cross）
     if per_timestep_files:
         fname = os.path.join(save_dir, f"spectrum_t={tval:.6f}.csv")
         with open(fname, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["k", "E_u", "E_B", "E_total", "t"])
+            writer.writerow(["k", "E_u", "E_B", "H_cross", "E_total", "t"])
             for kk in k_arr:
-                writer.writerow([int(kk), float(E_u[kk]), float(E_B[kk]), float(E_u[kk] + E_B[kk]), float(tval)])
+                writer.writerow([int(kk),
+                                 float(E_u[kk]),
+                                 float(E_B[kk]),
+                                 float(H_cross[kk]),
+                                 float(E_u[kk] + E_B[kk]),
+                                 float(tval)])
 
-    # 追加到汇总长表（按行存 t,k,E_u,E_B）
+    # 追加到汇总长表（包含 H_cross 列）
     agg_path = os.path.join(save_dir, aggregate_filename)
     file_exists = os.path.exists(agg_path)
     with open(agg_path, "a", newline="") as f:
         writer = csv.writer(f)
         if not file_exists:
-            writer.writerow(["t", "k", "E_u", "E_B", "E_total"])
+            writer.writerow(["t", "k", "E_u", "E_B", "H_cross", "E_total"])
         for kk in k_arr:
-            writer.writerow([float(tval), int(kk), float(E_u[kk]), float(E_B[kk]), float(E_u[kk] + E_B[kk])])
+            writer.writerow([float(tval),
+                             int(kk),
+                             float(E_u[kk]),
+                             float(E_B[kk]),
+                             float(H_cross[kk]),
+                             float(E_u[kk] + E_B[kk])])
 
     # 返回便于进一步处理
-    return k_arr, E_u[1:], E_B[1:]
+    return k_arr, E_u[1:], E_B[1:], H_cross[1:]
 
 F = (
     # u
