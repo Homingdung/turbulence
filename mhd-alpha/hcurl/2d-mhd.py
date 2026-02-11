@@ -108,7 +108,7 @@ psi = cos(2 * x + 2.3) + cos(y + 4.1)
 u_init = v_grad(psi)
 B_init = v_grad(phi)
   
-alpha = CellDiameter(mesh)
+alpha = Constant(2) * CellDiameter(mesh)
 
 # compute the value of meshsize alpha
 def mesh_sizes(mh):

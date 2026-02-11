@@ -40,7 +40,7 @@ plt.loglog(k, E_u, label="Kinetic")
 plt.loglog(k, E_B, label="Magnetic")
 plt.loglog(k, E_tot, "--", label="Total")
 #plt.loglog(k, H_mag, "-", label="MagneticHelicity")
-plt.loglog(k, H_cross, "-", label="CrossHelicity")
+#plt.loglog(k, H_cross, "-", label="CrossHelicity")
 
 # ---- k^{-5/3} 参考线（对齐中间波数）----
 k0 = k[len(k)//2]
