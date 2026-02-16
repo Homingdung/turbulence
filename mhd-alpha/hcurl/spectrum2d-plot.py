@@ -18,9 +18,9 @@ if "E_total" not in df.columns:
 
 # ====== 3. 选最后一个时间步 ======
 t = df["t"].max()
-#t_plot = 1.5
-#t_vals = df["t"].unique()
-#t = t_vals[(abs(t_vals - t_plot)).argmin()]
+t_plot = 1.8
+t_vals = df["t"].unique()
+t = t_vals[(abs(t_vals - t_plot)).argmin()]
 df_t = df[df["t"] == t]
 
 k = df_t["k"].values
