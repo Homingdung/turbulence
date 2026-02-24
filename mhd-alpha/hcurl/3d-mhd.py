@@ -6,8 +6,8 @@ import numpy as np
 from mpi4py import MPI
 import matplotlib.pyplot as plt
 import os
-nu = Constant(1e-3)
-eta = Constant(1e-3)
+nu = Constant(0)
+eta = Constant(0)
 S = Constant(1)
 
 def helicity_c(u, B):
@@ -76,23 +76,23 @@ z_prev = Function(Z)
 (up, Pp, u_bp, wp, Bp, Ep, jp, Hp) = split(z_prev)
 
 # helicityhu ic sp test
-#u1 = -sin(pi*(x-1/2))*cos(pi*(y-1/2))*z0*(z0-1)
-#u2 = cos(pi*(x-1/2))*sin(pi*(y-1/2))*z0*(z0-1)
-#u_init = as_vector([u1, u2, 0])
-##B1 = -sin(pi*x)*cos(pi*y)
-#B2 = cos(pi*x)*sin(pi*y)
-#B_init = as_vector([B1, B2, 0])
+u1 = -sin(pi*(x-1/2))*cos(pi*(y-1/2))*z0*(z0-1)
+u2 = cos(pi*(x-1/2))*sin(pi*(y-1/2))*z0*(z0-1)
+u_init = as_vector([u1, u2, 0])
+B1 = -sin(pi*x)*cos(pi*y)
+B2 = cos(pi*x)*sin(pi*y)
+B_init = as_vector([B1, B2, 0])
 
 # ABC flow
-A0 = Constant(1)
-B0 = Constant(1)
-C0 = Constant(1)
-u1 = A0 * sin(z0) + C0 * cos(y)
-u2 = B0 * sin(x) + A0 * cos(z0)
-u3 = C0 * sin(y) + B0 * cos(x)
+#A0 = Constant(1)
+#B0 = Constant(1)
+#C0 = Constant(1)
+#u1 = A0 * sin(z0) + C0 * cos(y)
+#u2 = B0 * sin(x) + A0 * cos(z0)
+#u3 = C0 * sin(y) + B0 * cos(x)
 
-u_init = as_vector([u1, u2, u3])
-B_init = as_vector([u1, u2, u3])
+#u_init = as_vector([u1, u2, u3])
+#B_init = as_vector([u1, u2, u3])
 
 alpha = CellDiameter(mesh)
 

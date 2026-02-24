@@ -46,7 +46,7 @@ sp = lu
 # spatial parameters
 baseN = 4
 nref = 0
-mesh = PeriodicUnitCubeMesh(baseN, baseN, baseN)
+mesh = UnitCubeMesh(baseN, baseN, baseN)
 mesh.coordinates.dat.data[:] *= 2 * pi
 
 x, y, z0 = SpatialCoordinate(mesh)
@@ -76,16 +76,12 @@ z_prev = Function(Z)
 (ut, Pt, wt, u_bt, w_bt, At, Bt, jt) = split(z_test)
 (up, Pp, wp, u_bp, w_bp, Ap, Bp, jp) = split(z_prev)
 
-# ABC flow
-A0 = Constant(1)
-B0 = Constant(1)
-C0 = Constant(1)
-u1 = A0 * sin(z0) + C0 * cos(y)
-u2 = B0 * sin(x) + A0 * cos(z0)
-u3 = C0 * sin(y) + B0 * cos(x)
-
-u_init = as_vector([u1, u2, u3])
-B_init = as_vector([u1, u2, u3])
+u1 = -sin(pi*(x-1/2))*cos(pi*(y-1/2))*z0*(z0-1)
+u2 = cos(pi*(x-1/2))*sin(pi*(y-1/2))*z0*(z0-1)
+u_init = as_vector([u1, u2, 0])
+B1 = -sin(pi*x)*cos(pi*y)
+B2 = cos(pi*x)*sin(pi*y)
+B_init = as_vector([B1, B2, 0])
 
 alpha = CellDiameter(mesh)
 
@@ -102,46 +98,32 @@ def mesh_sizes(mh):
 
 # solve for u_b_init
 def u_b_solver(u):
-    u_init = Function(Vc).interpolate(u)
-    u_b = Function(Vc)
-    v = TestFunction(Vc)
-    F = inner(u_b, v) * dx + alpha**2 * inner(curl(u_b), curl(v)) * dx - inner(u_init, v) * dx
-    sp_ub = {  
-           "ksp_type":"gmres",
-           "pc_type": "ilu",
-    }
-    sp_riesz = {
-         "mat_type": "nest",
-        "snes_type": "ksponly",
-        "snes_monitor": None,
-        "ksp_monitor": None,
-        "ksp_max_it": 1000,
-        "ksp_norm_type": "preconditioned",
-        "ksp_type": "minres",
-        "pc_type": "lu",
-        "pc_factor_mat_solver_type": "mumps",
-        "ksp_atol": 1.0e-5,
-        "ksp_rtol": 1.0e-5,
-        "ksp_minres_nutol": 1E-8,
-        "ksp_convergence_test": "skip",
+    Z_b = MixedFunctionSpace([Vd, Vc]) # u_b, w_b
+    z_b = Function(Z_b)
+    z_t = TestFunction(Z_b)
 
-    }
-    
-    def riesz_u_b(u, v):
-        return inner(u, v) * dx + alpha **2 * inner(curl(u), curl(v)) * dx
-    
-    u_b0 = TrialFunction(Vc)
-    u_b1 = TestFunction(Vc)
-    Jp_riesz = riesz_u_b(u_b0, u_b1)
+    (u_b, w_b) = split(z_b)
+    (u_bt, w_bt) = split(z_t)
+    F_b = (
+        # u_b
+        inner(u_b, u_bt) * dx
+        + alpha **2 * inner(curl(w_b), u_bt) * dx
+        - inner(u, u_bt) * dx
+        # w_b
+        + inner(w_b, w_bt) * dx
+        - inner(u_b, curl(w_bt)) * dx
+    )
 
-    bcs0 = [DirichletBC(Vc, 0, "on_boundary")]
+    bcs0 = [
+        DirichletBC(Z_b.sub(0), 0, "on_boundary"),
+        DirichletBC(Z_b.sub(1), 0, "on_boundary")
+    ]
 
-    pb0 = NonlinearVariationalProblem(F, u_b, bcs0, Jp = Jp_riesz)
-    solver0 = NonlinearVariationalSolver(pb0, solver_parameters = sp_riesz, options_prefix = "solve curlcurl for u_b") 
+    pb0 = NonlinearVariationalProblem(F_b, z_b, bcs0)
+    solver0 = NonlinearVariationalSolver(pb0, solver_parameters = lu, options_prefix = "solve curlcurl for u_b") 
     solver0.solve()
-    return u_b
+    return z_b.sub(0), z_b.sub(1)
 
-#u_b_init = u_b_solver(u_init)
 
 def project_ic(B_init):
     # Need to project the initial conditions
@@ -184,17 +166,37 @@ def project_ic(B_init):
  
     return zp.subfunctions[0]
 
+def helicity_m(B):
+    A = Function(Vc)
+    v = TestFunction(Vc)
+    F_curl  = inner(curl(A), curl(v)) * dx - inner(B, curl(v)) * dx
+    sp = {  
+           "ksp_type":"preonly",
+           "pc_type": "lu",
+           "pc_factor_mat_solver_type": "mumps",
+    }
+    bcs_curl = [DirichletBC(Vc, 0, "on_boundary")]
+    pb_curl = NonlinearVariationalProblem(F_curl, A, bcs_curl)
+    solver_curl= NonlinearVariationalSolver(pb_curl, solver_parameters = sp, options_prefix = "solver_curlcurl")
+    solver_curl.solve()
+    return A, assemble(inner(A, B)*dx)
 
-z_prev.sub(0).interpolate(u_init)
-z_prev.sub(6).interpolate(project_ic(B_init))  # B component
+u_init_proj = project_ic(u_init)
+u_b_init, w_b_init = u_b_solver(u_init_proj)
+B_init_proj = project_ic(B_init)
+A_init = helicity_m(B_init)[0]
+
+z_prev.sub(0).interpolate(u_init_proj)
 #z_prev.sub(3).interpolate(u_b_init)
+#z_prev.sub(4).interpolate(w_b_init)
+z_prev.sub(5).interpolate(A_init)  
+#z_prev.sub(6).interpolate(B_init)  
 z.assign(z_prev)
-
 
 u_avg = (u + up)/2
 A_avg = (A + Ap)/2
-B_avg = B
-u_b_avg = u_b
+B_avg = B 
+u_b_avg = u_b 
 P_avg = P
 j_avg = j
 w_avg = w
@@ -232,8 +234,8 @@ F = (
 )
 
 dirichlet_ids = ("on_boundary",)
-#bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids]
-bcs = None
+bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids]
+#bcs = None
 
 (u_, P_, w_, u_b_, w_b_, A_, B_, j_) = z.subfunctions
 u_.rename("Velocity")
@@ -246,20 +248,6 @@ j_.rename("Current")
 
 pvd = VTKFile("output/mhd-alpha.pvd")
 
-def helicity_m(B):
-    A = Function(Vc)
-    v = TestFunction(Vc)
-    F_curl  = inner(curl(A), curl(v)) * dx - inner(B, curl(v)) * dx
-    sp = {  
-           "ksp_type":"preonly",
-           "pc_type": "lu",
-           "pc_factor_mat_solver_type": "mumps",
-    }
-    bcs_curl = [DirichletBC(Vc, 0, "on_boundary")]
-    pb_curl = NonlinearVariationalProblem(F_curl, A, bcs_curl)
-    solver_curl= NonlinearVariationalSolver(pb_curl, solver_parameters = sp, options_prefix = "solver_curlcurl")
-    solver_curl.solve()
-    return A, assemble(inner(A, B)*dx)
 
 def norm_inf(u):
     with u.dat.vec_ro as u_v:
@@ -295,12 +283,12 @@ if mesh.comm.rank == 0:
 
 #u_b = u_b_solver(z_prev.sub(0))
 energy = energy_uB(z_prev.sub(0), z_prev.sub(3), z_prev.sub(6)) #u, u_b, B
-crosshelicity = helicity_c(z.sub(0), z.sub(6)) # u, B
-A_fn, maghelicity = helicity_m(z.sub(6)) # B
-divu = div_u(z.sub(0))
-divB = div_B(z.sub(6))
+crosshelicity = helicity_c(z_prev.sub(0), z_prev.sub(6)) # u, B
+A_fn, maghelicity = helicity_m(z_prev.sub(6)) # B
+divu = div_u(z_prev.sub(0))
+divB = div_B(z_prev.sub(6))
 # monitor
-w_max, j_max, ens_total = compute_ens(z.sub(2), z.sub(7)) # w, j
+w_max, j_max, ens_total = compute_ens(z_prev.sub(2), z_prev.sub(7)) # w, j
 
 if mesh.comm.rank == 0:
     row = {
