@@ -19,7 +19,7 @@ def div_u(u):
 def div_B(B):
     return norm(div(B), "L2")
 
-def energy_uB(u, u_b, B):
+def energy_uB(u_b, B):
     return 0.5 * assemble(inner(u, u_b) * dx + S * inner(B, B) * dx)
 
 
@@ -76,23 +76,23 @@ z_prev = Function(Z)
 (up, Pp, u_bp, wp, Bp, Ep, jp, Hp) = split(z_prev)
 
 # helicityhu ic sp test
-u1 = -sin(pi*(x-1/2))*cos(pi*(y-1/2))*z0*(z0-1)
-u2 = cos(pi*(x-1/2))*sin(pi*(y-1/2))*z0*(z0-1)
-u_init = as_vector([u1, u2, 0])
-B1 = -sin(pi*x)*cos(pi*y)
-B2 = cos(pi*x)*sin(pi*y)
-B_init = as_vector([B1, B2, 0])
+#u1 = -sin(pi*(x-1/2))*cos(pi*(y-1/2))*z0*(z0-1)
+#u2 = cos(pi*(x-1/2))*sin(pi*(y-1/2))*z0*(z0-1)
+#u_init = as_vector([u1, u2, 0])
+#B1 = -sin(pi*x)*cos(pi*y)
+#B2 = cos(pi*x)*sin(pi*y)
+#B_init = as_vector([B1, B2, 0])
 
 # ABC flow
-#A0 = Constant(1)
-#B0 = Constant(1)
-#C0 = Constant(1)
-#u1 = A0 * sin(z0) + C0 * cos(y)
-#u2 = B0 * sin(x) + A0 * cos(z0)
-#u3 = C0 * sin(y) + B0 * cos(x)
+A0 = Constant(1)
+B0 = Constant(1)
+C0 = Constant(1)
+u1 = A0 * sin(z0) + C0 * cos(y)
+u2 = B0 * sin(x) + A0 * cos(z0)
+u3 = C0 * sin(y) + B0 * cos(x)
 
-#u_init = as_vector([u1, u2, u3])
-#B_init = as_vector([u1, u2, u3])
+u_init = as_vector([u1, u2, u3])
+B_init = as_vector([u1, u2, u3])
 
 alpha = CellDiameter(mesh)
 
@@ -142,13 +142,11 @@ def u_b_solver(u):
     Jp_riesz = riesz_u_b(u_b0, u_b1)
 
     bcs0 = [DirichletBC(Vc, 0, "on_boundary")]
-
+    bcs0 = None
     pb0 = NonlinearVariationalProblem(F, u_b, bcs0, Jp = Jp_riesz)
     solver0 = NonlinearVariationalSolver(pb0, solver_parameters = sp_riesz, options_prefix = "solve curlcurl for u_b") 
     solver0.solve()
     return u_b
-
-u_b_init = u_b_solver(u_init)
 
 def project_ic(B_init):
     # Need to project the initial conditions
@@ -194,14 +192,15 @@ def project_ic(B_init):
 #z_prev.sub(0).interpolate(u_init)
 #z_prev.sub(4).interpolate(B_init)
 
+u_b_init = u_b_solver(u_init)
 z_prev.sub(0).interpolate(u_init)
-z_prev.sub(4).interpolate(project_ic(B_init))  # B component
 z_prev.sub(2).interpolate(u_b_init)
+z_prev.sub(4).interpolate(project_ic(B_init))  # B component
 z.assign(z_prev)
 
 u_avg = (u + up)/2
 B_avg = (B + Bp)/2
-u_b_avg = u_b
+u_b_avg = (u_b + u_bp)/2
 P_avg = P
 j_avg = j
 H_avg = H
@@ -344,10 +343,10 @@ def spectrum_and_save(u, A, B, tval,
                              float(E_u[kk] + E_B[kk])])
 
     return k_arr, E_u[1:], E_B[1:], H_mag_spec[1:], H_cross_spec[1:]
+
 F = (
     # u
      inner((u - up)/dt, ut) * dx
-    #+ inner(filter_term(u_avg, u_b), ut) * dx # correction term
     - inner(cross(u_b_avg, w_avg), ut) * dx # advection term
     + inner(grad(P_avg), ut) * dx
     + nu * inner(curl(u_avg), curl(ut)) * dx
@@ -355,9 +354,9 @@ F = (
     # p
     + inner(u_avg, grad(Pt)) * dx
     # u_b
-    + inner(u_b_avg, u_bt) * dx
-    + alpha**2 * inner(curl(u_b_avg), curl(u_bt)) * dx
-    - inner(u_avg, u_bt) * dx
+    + inner(u_b, u_bt) * dx
+    + alpha**2 * inner(curl(u_b), curl(u_bt)) * dx
+    - inner(u, u_bt) * dx
     # w
     + inner(w_avg, wt) * dx
     - inner(curl(u_avg), wt) * dx
@@ -402,6 +401,7 @@ def helicity_m(B):
            "pc_factor_mat_solver_type": "mumps",
     }
     bcs_curl = [DirichletBC(Vc, 0, "on_boundary")]
+    bcs_curl = None
     pb_curl = NonlinearVariationalProblem(F_curl, A, bcs_curl)
     solver_curl= NonlinearVariationalSolver(pb_curl, solver_parameters = sp, options_prefix = "solver_curlcurl")
     solver_curl.solve()
@@ -439,9 +439,9 @@ if mesh.comm.rank == 0:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
 
-u_b = u_b_solver(z_prev.sub(0))
-energy = energy_uB(z_prev.sub(0),u_b, z_prev.sub(4)) #u, u_b, B
-crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, u_b, B
+
+energy = energy_uB(z.sub(2), z.sub(4)) #u_b, B
+crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, B
 A_fn, maghelicity = helicity_m(z.sub(4)) # B
 divu = div_u(z.sub(0))
 divB = div_B(z.sub(4))
@@ -471,9 +471,8 @@ while (float(t) < float(T-dt)+1.0e-10):
     if mesh.comm.rank == 0:
         print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}, dofs = {dofs}, dofs_per_core = {dofs_per_core}", flush=True)
     solver.solve()
-    u_b = u_b_solver(z.sub(0)) 
-    energy = energy_uB(z.sub(0),u_b, z.sub(4)) #u, u_b, B
-    crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, u_b, B
+    energy = energy_uB(z.sub(2), z.sub(4)) #u_b, B
+    crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, B
     A_fn, maghelicity = helicity_m(z.sub(4)) # B
     divu = div_u(z.sub(0))
     divB = div_B(z.sub(4))

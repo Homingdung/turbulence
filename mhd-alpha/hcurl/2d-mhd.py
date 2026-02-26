@@ -108,7 +108,7 @@ psi = cos(2 * x + 2.3) + cos(y + 4.1)
 u_init = v_grad(psi)
 B_init = v_grad(phi)
   
-alpha = Constant(2) * CellDiameter(mesh)
+alpha = CellDiameter(mesh)
 def energy_uB(u_b, B):
     return 0.5 * assemble(inner(u_b, u_b) * dx + alpha **2 * inner(curl(u_b), curl(u_b)) * dx + S * inner(B, B) * dx)
     #return 0.5 * assemble(inner(u, u_b) * dx + S * inner(B, B) * dx)
@@ -334,7 +334,6 @@ def spectrum_and_save(u, B, tval,
 F = (
     # u
      inner((u - up)/dt, ut) * dx
-    #+ inner(filter_term(u_avg, u_b), ut) * dx # correction term
     - inner(vcross(u_b_avg, w_avg), ut) * dx # advection term
     + inner(grad(P_avg), ut) * dx
     + nu * inner(curl(u_avg), curl(ut)) * dx
@@ -417,7 +416,7 @@ if mesh.comm.rank == 0:
 
 
 energy = energy_uB(z.sub(2), z.sub(4)) #u_b, B
-crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, u_b, B
+crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, B
 maghelicity = helicity_m(z.sub(4)) # B
 divu = div_u(z.sub(0))
 divB = div_B(z.sub(4))
@@ -447,8 +446,8 @@ while (float(t) < float(T-dt)+1.0e-10):
     if mesh.comm.rank == 0:
         print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}, dofs = {dofs}, dofs_per_core = {dofs_per_core}", flush=True)
     solver.solve()
-    energy = energy_uB(z.sub(2), z.sub(4)) #u, u_b, B
-    crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u,  B
+    energy = energy_uB(z.sub(2), z.sub(4)) #u_b, B
+    crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, B
     maghelicity = helicity_m(z.sub(4)) # B
     divu = div_u(z.sub(0))
     divB = div_B(z.sub(4))
