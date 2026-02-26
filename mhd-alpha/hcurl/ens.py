@@ -17,6 +17,6 @@ plt.ylabel("Value")
 plt.legend()
 #plt.grid(True)
 
-plt.savefig("monitor-ens.png", dpi=300)
+plt.savefig("output/monitor-ens.png", dpi=300)
 plt.show()
 

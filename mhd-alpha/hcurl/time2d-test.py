@@ -20,8 +20,6 @@ def div_u(u):
 def div_B(B):
     return norm(div(B), "L2")
 
-def energy_uB(u, u_b, B):
-    return 0.5 * assemble(inner(u, u_b) * dx + S * inner(B, B) * dx)
 
 def scross(x, y):
     return x[0]*y[1] - x[1]*y[0]
@@ -62,7 +60,7 @@ lu = {
 sp = lu
 
 # spatial parameters
-baseN = 32
+baseN = 100
 nref = 0
 Lx = 3
 Ly = 1
@@ -109,6 +107,9 @@ u_init = v_grad(psi)
 B_init = v_grad(phi)
   
 alpha = Constant(2) * CellDiameter(mesh)
+def energy_uB(u, u_b, B):
+    #return 0.5 * assemble(inner(u_b, u_b) * dx + alpha **2 * inner(curl(u_b), curl(u_b)) * dx + S * inner(B, B) * dx)
+    return 0.5 * assemble(inner(u, u_b) * dx + S * inner(B, B) * dx)
 
 # compute the value of meshsize alpha
 def mesh_sizes(mh):
@@ -211,51 +212,47 @@ z_prev.sub(4).interpolate(project_ic(B_init))  # B component
 z_prev.sub(2).interpolate(u_b_init)
 z.assign(z_prev)
 
-def form(z, z_test):
-    (u, P, u_b, w, B, E, j, H) = split(z)
-    (ut, Pt, u_bt, wt, Bt, Et, jt, Ht) = split(z_test)
-    #(up, Pp, u_bp, wp, Bp, Ep, jp, Hp) = split(z_prev)
+u_avg = (u + up)/2
+B_avg = (B + Bp)/2
+u_b_avg = (u_b + u_bp)/2
+P_avg = P
+j_avg = j
+H_avg = H
+w_avg = w
+E_avg = E
 
-    F = (
+
+F = (
     # u
-    - inner(vcross(u_b, w), ut) * dx # advection term
-    + inner(grad(P), ut) * dx
-    + nu * inner(curl(u), curl(ut)) * dx
-    + S * inner(vcross(H, j), ut) * dx
+     inner((u - up)/dt, ut) * dx
+    #+ inner(filter_term(u_avg, u_b), ut) * dx # correction term
+    - inner(vcross(u_b_avg, w_avg), ut) * dx # advection term
+    + inner(grad(P_avg), ut) * dx
+    + nu * inner(curl(u_avg), curl(ut)) * dx
+    + S * inner(vcross(H_avg, j_avg), ut) * dx
     # p
-    + inner(u, grad(Pt)) * dx
+    + inner(u_avg, grad(Pt)) * dx
     # u_b
     + inner(u_b, u_bt) * dx
     + alpha**2 * inner(curl(u_b), curl(u_bt)) * dx
     - inner(u, u_bt) * dx
     # w
-    + inner(w, wt) * dx
-    - inner(scurl(u), wt) * dx
+    + inner(w_avg, wt) * dx
+    - inner(scurl(u_avg), wt) * dx
     # B
-    + inner(vcurl(E), Bt) * dx
+    + inner((B - Bp)/dt, Bt) * dx
+    + inner(vcurl(E_avg), Bt) * dx
     # E
-    + inner(E, Et) * dx
-    + inner(scross(u_b, H), Et) * dx
-    - eta * inner(j, Et) * dx
+    + inner(E_avg, Et) * dx
+    + inner(scross(u_b_avg, H_avg), Et) * dx
+    - eta * inner(j_avg, Et) * dx
     # j 
-    + inner(j, jt) * dx
-    - inner(B, vcurl(jt)) * dx
+    + inner(j_avg, jt) * dx
+    - inner(B_avg, vcurl(jt)) * dx
     # H
-    + inner(H, Ht) * dx
-    - inner(B, Ht) * dx
-    )
-    return F
-
-
-# Crank Nicolson form
-F = (
-     inner(split(z)[0], split(z_test)[0])*dx
-   - inner(split(z_prev)[0], split(z_test)[0])*dx
-   + inner(split(z)[4], split(z_test)[4])*dx
-   - inner(split(z_prev)[4], split(z_test)[4])*dx
-   + 0.5*dt*(form(z, z_test) + form(z_prev, z_test))
+    + inner(H_avg, Ht) * dx
+    - inner(B_avg, Ht) * dx
 )
-
 
 dirichlet_ids = ("on_boundary",)
 #bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids]
@@ -311,8 +308,8 @@ if mesh.comm.rank == 0:
 
 #z_mean = Function(Z)
 #z_mean.assign(0.5*(z + z_prev))
-u_b = u_b_solver(z.sub(0))
-energy = energy_uB(z.sub(0), z.sub(0), z.sub(4)) #u, u_b, B
+#u_b = u_b_solver(z.sub(0))
+energy = energy_uB(z.sub(0), z.sub(2), z.sub(4)) #u_b, B
 crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, u_b, B
 maghelicity = helicity_m(z.sub(4)) # B
 divu = div_u(z.sub(0))
@@ -343,11 +340,11 @@ while (float(t) < float(T-dt)+1.0e-10):
     if mesh.comm.rank == 0:
         print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}, dofs = {dofs}, dofs_per_core = {dofs_per_core}", flush=True)
     solver.solve()
-    u_b = u_b_solver(z.sub(0)) 
+#   u_b = u_b_solver(z.sub(0)) 
     #z_mean.assign(0.5*(z + z_prev))
     # half time evaluation
     #energy = energy_uB(z_mean.sub(0),z.sub(2), z_mean.sub(4)) #u, u_b, B
-    energy = energy_uB(z.sub(0),z.sub(0), z.sub(4)) #u, u_b, B
+    energy = energy_uB(z.sub(0), z.sub(2), z.sub(4)) #u, u_b, B
     crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u,  B
     maghelicity = helicity_m(z.sub(4)) # B
     divu = div_u(z.sub(0))
