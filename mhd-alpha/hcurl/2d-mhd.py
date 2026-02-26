@@ -20,9 +20,6 @@ def div_u(u):
 def div_B(B):
     return norm(div(B), "L2")
 
-def energy_uB(u, u_b, B):
-    return 0.5 * assemble(inner(u, u_b) * dx + S * inner(B, B) * dx)
-
 def scross(x, y):
     return x[0]*y[1] - x[1]*y[0]
 
@@ -83,7 +80,7 @@ Vn = FunctionSpace(mesh, "DG", 0)
 # time 
 t = Constant(0) 
 T = 20.0
-dt = Constant(0.001)
+dt = Constant(0.1)
 
 # (u, P, u_b, w, B, E, j, H)
 Z = MixedFunctionSpace([Vc, Q, Vc, Q, Vd, Q, Q, Vc])
