@@ -7,8 +7,8 @@ import numpy as np
 from mpi4py import MPI
 import matplotlib.pyplot as plt
 
-nu = Constant(1e-3)
-eta = Constant(1e-3)
+nu = Constant(0)
+eta = Constant(0)
 S = Constant(1)
 
 def helicity_c(u, B):
@@ -83,7 +83,7 @@ Vn = FunctionSpace(mesh, "DG", 0)
 # time 
 t = Constant(0) 
 T = 20.0
-dt = Constant(0.1)
+dt = Constant(0.001)
 
 # (u, P, u_b, w, B, E, j, H)
 Z = MixedFunctionSpace([Vc, Q, Vc, Q, Vd, Q, Q, Vc])
@@ -109,6 +109,9 @@ u_init = v_grad(psi)
 B_init = v_grad(phi)
   
 alpha = Constant(2) * CellDiameter(mesh)
+def energy_uB(u, u_b, B):
+    #return 0.5 * assemble(inner(u_b, u_b) * dx + alpha **2 * inner(curl(u_b), curl(u_b)) * dx + S * inner(B, B) * dx)
+    return 0.5 * assemble(inner(u, u_b) * dx + S * inner(B, B) * dx)
 
 # compute the value of meshsize alpha
 def mesh_sizes(mh):
@@ -213,7 +216,7 @@ z.assign(z_prev)
 
 u_avg = (u + up)/2
 B_avg = (B + Bp)/2
-u_b_avg = u_b
+u_b_avg = (u_b + u_bp)/2
 P_avg = P
 j_avg = j
 H_avg = H
@@ -339,9 +342,9 @@ F = (
     # p
     + inner(u_avg, grad(Pt)) * dx
     # u_b
-    + inner(u_b_avg, u_bt) * dx
-    + alpha**2 * inner(curl(u_b_avg), curl(u_bt)) * dx
-    - inner(u_avg, u_bt) * dx
+    + inner(u_b, u_bt) * dx
+    + alpha**2 * inner(curl(u_b), curl(u_bt)) * dx
+    - inner(u, u_bt) * dx
     # w
     + inner(w_avg, wt) * dx
     - inner(scurl(u_avg), wt) * dx
@@ -412,8 +415,8 @@ if mesh.comm.rank == 0:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
 
-u_b = u_b_solver(z_prev.sub(0))
-energy = energy_uB(z_prev.sub(0),u_b, z_prev.sub(4)) #u, u_b, B
+
+energy = energy_uB(z.sub(0), z.sub(2), z.sub(4)) #u_b, B
 crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, u_b, B
 maghelicity = helicity_m(z.sub(4)) # B
 divu = div_u(z.sub(0))
@@ -444,9 +447,8 @@ while (float(t) < float(T-dt)+1.0e-10):
     if mesh.comm.rank == 0:
         print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}, dofs = {dofs}, dofs_per_core = {dofs_per_core}", flush=True)
     solver.solve()
-    u_b = u_b_solver(z.sub(0)) 
-    energy = energy_uB(z.sub(0),u_b, z.sub(4)) #u, u_b, B
-    crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, u_b, B
+    energy = energy_uB(z.sub(0), z.sub(2), z.sub(4)) #u, u_b, B
+    crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u,  B
     maghelicity = helicity_m(z.sub(4)) # B
     divu = div_u(z.sub(0))
     divB = div_B(z.sub(4))

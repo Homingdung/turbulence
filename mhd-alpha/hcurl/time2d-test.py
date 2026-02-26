@@ -306,9 +306,7 @@ if mesh.comm.rank == 0:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
 
-#z_mean = Function(Z)
-#z_mean.assign(0.5*(z + z_prev))
-#u_b = u_b_solver(z.sub(0))
+
 energy = energy_uB(z.sub(0), z.sub(2), z.sub(4)) #u_b, B
 crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, u_b, B
 maghelicity = helicity_m(z.sub(4)) # B
@@ -340,10 +338,6 @@ while (float(t) < float(T-dt)+1.0e-10):
     if mesh.comm.rank == 0:
         print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}, dofs = {dofs}, dofs_per_core = {dofs_per_core}", flush=True)
     solver.solve()
-#   u_b = u_b_solver(z.sub(0)) 
-    #z_mean.assign(0.5*(z + z_prev))
-    # half time evaluation
-    #energy = energy_uB(z_mean.sub(0),z.sub(2), z_mean.sub(4)) #u, u_b, B
     energy = energy_uB(z.sub(0), z.sub(2), z.sub(4)) #u, u_b, B
     crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u,  B
     maghelicity = helicity_m(z.sub(4)) # B
