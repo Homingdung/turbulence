@@ -19,10 +19,6 @@ def div_u(u):
 def div_B(B):
     return norm(div(B), "L2")
 
-def energy_uB(u_b, B):
-    return 0.5 * assemble(inner(u, u_b) * dx + S * inner(B, B) * dx)
-
-
 # solver parameter
 ICNTL_14 = 5000
 tele_reduc_fac = int(MPI.COMM_WORLD.size/4)
@@ -63,7 +59,8 @@ T = 1.0
 dt = Constant(0.01)
 
 alpha = CellDiameter(mesh)
-    
+def energy_uB(u_b, B):
+    return 0.5 * assemble(inner(u_b, u_b) * dx + alpha**2 * inner(curl(u_b), curl(u_b)) * dx + S * inner(B, B) * dx)
 
 # (u, P, u_b, w, B, E, j, H)
 Z = MixedFunctionSpace([Vc, Q, Vc, Vc, Vd, Vc, Vc, Vc])
@@ -93,8 +90,6 @@ u3 = C0 * sin(y) + B0 * cos(x)
 
 u_init = as_vector([u1, u2, u3])
 B_init = as_vector([u1, u2, u3])
-
-alpha = CellDiameter(mesh)
 
 # compute the value of meshsize alpha
 def mesh_sizes(mh):
@@ -142,7 +137,6 @@ def u_b_solver(u):
     Jp_riesz = riesz_u_b(u_b0, u_b1)
 
     bcs0 = [DirichletBC(Vc, 0, "on_boundary")]
-    bcs0 = None
     pb0 = NonlinearVariationalProblem(F, u_b, bcs0, Jp = Jp_riesz)
     solver0 = NonlinearVariationalSolver(pb0, solver_parameters = sp_riesz, options_prefix = "solve curlcurl for u_b") 
     solver0.solve()
@@ -395,17 +389,16 @@ def helicity_m(B):
     A = Function(Vc)
     v = TestFunction(Vc)
     F_curl  = inner(curl(A), curl(v)) * dx - inner(B, curl(v)) * dx
-    sp = {  
-           "ksp_type":"preonly",
-           "pc_type": "lu",
-           "pc_factor_mat_solver_type": "mumps",
+    sp_helicity = {  
+           "ksp_type":"gmres",
+           "pc_type": "ilu",
+    #"pc_factor_mat_solver_type": "mumps",
     }
     bcs_curl = [DirichletBC(Vc, 0, "on_boundary")]
-    bcs_curl = None
     pb_curl = NonlinearVariationalProblem(F_curl, A, bcs_curl)
-    solver_curl= NonlinearVariationalSolver(pb_curl, solver_parameters = sp, options_prefix = "solver_curlcurl")
+    solver_curl= NonlinearVariationalSolver(pb_curl, solver_parameters = sp_helicity, options_prefix = "solver_curlcurl")
     solver_curl.solve()
-    return A, assemble(inner(A, B)*dx)
+    return A, assemble(inner(A, curl(A))*dx)
 
 def norm_inf(u):
     with u.dat.vec_ro as u_v:
