@@ -109,9 +109,9 @@ u_init = v_grad(psi)
 B_init = v_grad(phi)
   
 alpha = Constant(2) * CellDiameter(mesh)
-def energy_uB(u, u_b, B):
-    #return 0.5 * assemble(inner(u_b, u_b) * dx + alpha **2 * inner(curl(u_b), curl(u_b)) * dx + S * inner(B, B) * dx)
-    return 0.5 * assemble(inner(u, u_b) * dx + S * inner(B, B) * dx)
+def energy_uB(u_b, B):
+    return 0.5 * assemble(inner(u_b, u_b) * dx + alpha **2 * inner(curl(u_b), curl(u_b)) * dx + S * inner(B, B) * dx)
+    #return 0.5 * assemble(inner(u, u_b) * dx + S * inner(B, B) * dx)
 
 # compute the value of meshsize alpha
 def mesh_sizes(mh):
@@ -416,7 +416,7 @@ if mesh.comm.rank == 0:
         writer.writeheader()
 
 
-energy = energy_uB(z.sub(0), z.sub(2), z.sub(4)) #u_b, B
+energy = energy_uB(z.sub(2), z.sub(4)) #u_b, B
 crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, u_b, B
 maghelicity = helicity_m(z.sub(4)) # B
 divu = div_u(z.sub(0))
@@ -447,7 +447,7 @@ while (float(t) < float(T-dt)+1.0e-10):
     if mesh.comm.rank == 0:
         print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}, dofs = {dofs}, dofs_per_core = {dofs_per_core}", flush=True)
     solver.solve()
-    energy = energy_uB(z.sub(0), z.sub(2), z.sub(4)) #u, u_b, B
+    energy = energy_uB(z.sub(2), z.sub(4)) #u, u_b, B
     crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u,  B
     maghelicity = helicity_m(z.sub(4)) # B
     divu = div_u(z.sub(0))
