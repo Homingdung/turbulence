@@ -1,12 +1,12 @@
-# dual2 scheme
-# u2 B2
-# see whether it preserves the three structures
+# 2d-mhd
+# understand the implicit midpoint rule for DAE system
 from firedrake import *
 import csv
+import os
 import numpy as np
 from mpi4py import MPI
 import matplotlib.pyplot as plt
-import os
+
 nu = Constant(0)
 eta = Constant(0)
 S = Constant(1)
@@ -23,6 +23,24 @@ def div_B(B):
 def energy_uB(u, u_b, B):
     return 0.5 * assemble(inner(u, u_b) * dx + S * inner(B, B) * dx)
 
+def scross(x, y):
+    return x[0]*y[1] - x[1]*y[0]
+
+def vcross(x, y):
+    return as_vector([x[1]*y, -x[0]*y])
+
+def scurl(x):
+    return x[1].dx(0) - x[0].dx(1)
+
+def vcurl(x):
+    return as_vector([x.dx(1), -x.dx(0)])
+
+def acurl(x):
+    return as_vector([
+                     x[2].dx(1),
+                     -x[2].dx(0),
+                     x[1].dx(0) - x[0].dx(1)
+                     ])
 
 # solver parameter
 ICNTL_14 = 5000
@@ -44,12 +62,16 @@ lu = {
 sp = lu
 
 # spatial parameters
-baseN = 4
+baseN = 32
 nref = 0
-mesh = PeriodicUnitCubeMesh(baseN, baseN, baseN)
+Lx = 3
+Ly = 1
+dp={"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
+mesh = PeriodicUnitSquareMesh(baseN, baseN, distribution_parameters=dp)
 mesh.coordinates.dat.data[:] *= 2 * pi
 
-x, y, z0 = SpatialCoordinate(mesh)
+
+x, y = SpatialCoordinate(mesh)
 
 # spatial discretization
 Vg = VectorFunctionSpace(mesh, "CG", 2)
@@ -60,30 +82,33 @@ Vn = FunctionSpace(mesh, "DG", 0)
 
 # time 
 t = Constant(0) 
-T = 1.0
-dt = Constant(0.01)
+T = 20.0
+dt = Constant(0.1)
 
-alpha = CellDiameter(mesh)
-    
-
-# (u2, P3, w1, u_b2, w_b1, A1, B2, j1)
-Z = MixedFunctionSpace([Vd, Vn, Vc, Vd, Vc, Vc, Vd, Vc])
+# (u, P, u_b, w, B, E, j, H)
+Z = MixedFunctionSpace([Vc, Q, Vc, Q, Vd, Q, Q, Vc])
 z = Function(Z)
 z_test = TestFunction(Z)
 z_prev = Function(Z)
 
-(u, P, w, u_b, w_b, A, B,j) = split(z)
-(ut, Pt, wt, u_bt, w_bt, At, Bt, jt) = split(z_test)
-(up, Pp, wp, u_bp, w_bp, Ap, Bp, jp) = split(z_prev)
+(u, P, u_b, w, B, E, j, H) = split(z)
+(ut, Pt, u_bt, wt, Bt, Et, jt, Ht) = split(z_test)
+(up, Pp, u_bp, wp, Bp, Ep, jp, Hp) = split(z_prev)
 
-u1 = -sin(pi*(x-1/2))*cos(pi*(y-1/2))*z0*(z0-1)
-u2 = cos(pi*(x-1/2))*sin(pi*(y-1/2))*z0*(z0-1)
-u_init = as_vector([u1, u2, 0])
-B1 = -sin(pi*x)*cos(pi*y)
-B2 = cos(pi*x)*sin(pi*y)
-B_init = as_vector([B1, B2, 0])
+def v_grad(x):
+    return as_vector([-x.dx(1), x.dx(0)])
 
-alpha = CellDiameter(mesh)
+# Biskamp-Welter-1989
+phi = cos(x + 1.4) + cos(y + 0.5)
+psi = cos(2 * x + 2.3) + cos(y + 4.1)
+
+#phi = cos(x) + cos(y)
+#psi = 0.5* cos(2 * x) + cos(y)
+
+u_init = v_grad(psi)
+B_init = v_grad(phi)
+  
+alpha = Constant(2) * CellDiameter(mesh)
 
 # compute the value of meshsize alpha
 def mesh_sizes(mh):
@@ -98,31 +123,44 @@ def mesh_sizes(mh):
 
 # solve for u_b_init
 def u_b_solver(u):
-    Z_b = MixedFunctionSpace([Vd, Vc]) # u_b, w_b
-    z_b = Function(Z_b)
-    z_t = TestFunction(Z_b)
+    u_init = Function(Vc).interpolate(u)
+    u_b = Function(Vc)
+    v = TestFunction(Vc)
+    F = inner(u_b, v) * dx + alpha**2 * inner(curl(u_b), curl(v)) * dx - inner(u_init, v) * dx
+    sp_ub = {  
+           "ksp_type":"gmres",
+           "pc_type": "ilu",
+    }
+    sp_riesz = {
+         "mat_type": "nest",
+        "snes_type": "ksponly",
+        "snes_monitor": None,
+        "ksp_monitor": None,
+        "ksp_max_it": 1000,
+        "ksp_norm_type": "preconditioned",
+        "ksp_type": "minres",
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "mumps",
+        "ksp_atol": 1.0e-5,
+        "ksp_rtol": 1.0e-5,
+        "ksp_minres_nutol": 1E-8,
+        "ksp_convergence_test": "skip",
 
-    (u_b, w_b) = split(z_b)
-    (u_bt, w_bt) = split(z_t)
-    F_b = (
-        # u_b
-          inner(u_b, u_bt) * dx
-        + alpha **2 * inner(curl(w_b), u_bt) * dx
-        - inner(u, u_bt) * dx
-        # w_b
-        + inner(w_b, w_bt) * dx
-        - inner(u_b, curl(w_bt)) * dx
-    )
+    }
+    
+    def riesz_u_b(u, v):
+        return inner(u, v) * dx + alpha **2 * inner(curl(u), curl(v)) * dx
+    
+    u_b0 = TrialFunction(Vc)
+    u_b1 = TestFunction(Vc)
+    Jp_riesz = riesz_u_b(u_b0, u_b1)
 
-    bcs0 = [
-        DirichletBC(Z_b.sub(0), 0, "on_boundary"),
-        DirichletBC(Z_b.sub(1), 0, "on_boundary")
-    ]
-    bcs0 = None
-    pb0 = NonlinearVariationalProblem(F_b, z_b, bcs0)
-    solver0 = NonlinearVariationalSolver(pb0, solver_parameters = lu, options_prefix = "solve curlcurl for u_b") 
+    bcs0 = [DirichletBC(Vc, 0, "on_boundary")]
+
+    pb0 = NonlinearVariationalProblem(F, u_b, bcs0, Jp = Jp_riesz)
+    solver0 = NonlinearVariationalSolver(pb0, solver_parameters = sp_riesz, options_prefix = "solve curlcurl for u_b") 
     solver0.solve()
-    return z_b.sub(0), z_b.sub(1)
+    return u_b
 
 
 def project_ic(B_init):
@@ -166,88 +204,78 @@ def project_ic(B_init):
  
     return zp.subfunctions[0]
 
-def helicity_m(B):
-    A = Function(Vc)
-    v = TestFunction(Vc)
-    F_curl  = inner(curl(A), curl(v)) * dx - inner(B, curl(v)) * dx
-    sp = {  
-           "ksp_type":"preonly",
-           "pc_type": "lu",
-           "pc_factor_mat_solver_type": "mumps",
-    }
-    bcs_curl = [DirichletBC(Vc, 0, "on_boundary")]
-    pb_curl = NonlinearVariationalProblem(F_curl, A, bcs_curl)
-    solver_curl= NonlinearVariationalSolver(pb_curl, solver_parameters = sp, options_prefix = "solver_curlcurl")
-    solver_curl.solve()
-    return A, assemble(inner(A, B)*dx)
 
-u_init_proj = project_ic(u_init)
-u_b_init, w_b_init = u_b_solver(u_init_proj)
-B_init_proj = project_ic(B_init)
-A_init = helicity_m(B_init_proj)[0]
-
-z_prev.sub(0).interpolate(u_init_proj)
-z_prev.sub(3).interpolate(u_b_init)
-z_prev.sub(4).interpolate(w_b_init)
-z_prev.sub(5).interpolate(A_init)  
-#z_prev.sub(6).interpolate(B_init)  
+u_b_init = u_b_solver(u_init)
+z_prev.sub(0).interpolate(u_init)
+z_prev.sub(4).interpolate(project_ic(B_init))  # B component
+z_prev.sub(2).interpolate(u_b_init)
 z.assign(z_prev)
 
-u_avg = (u + up)/2
-A_avg = (A + Ap)/2
-B_avg = B 
-u_b_avg = u_b 
-P_avg = P
-j_avg = j
-w_avg = w
-w_b_avg = w_b
+def form(z, z_test):
+    (u, P, u_b, w, B, E, j, H) = split(z)
+    (ut, Pt, u_bt, wt, Bt, Et, jt, Ht) = split(z_test)
+    #(up, Pp, u_bp, wp, Bp, Ep, jp, Hp) = split(z_prev)
 
-F = 
+    F = (
     # u
-      inner((u - up)/dt, ut) * dx
-    - inner(cross(u_b_avg, w_avg), ut) * dx # advection term
-    - inner(P_avg, div(ut)) * dx
-    + nu * inner(curl(w_avg), ut) * dx
-    - S * inner(cross(j_avg, B_avg), ut) * dx
+    - inner(vcross(u_b, w), ut) * dx # advection term
+    + inner(grad(P), ut) * dx
+    + nu * inner(curl(u), curl(ut)) * dx
+    + S * inner(vcross(H, j), ut) * dx
     # p
-    - inner(div(u_avg), Pt) * dx
-    # w  
-    + inner(w_avg, wt) * dx
-    - inner(u_avg, curl(wt)) * dx
+    + inner(u, grad(Pt)) * dx
     # u_b
-    + inner(u_b_avg, u_bt) * dx
-    + alpha**2 * inner(curl(w_b_avg), u_bt) * dx
-    - inner(u_avg, u_bt) * dx
-    # w_b
-    + inner(w_b_avg, w_bt) * dx
-    - inner(u_b_avg, curl(w_bt)) * dx
-    # A
-    + inner((A - Ap)/dt, At) * dx
-    + eta * inner(j_avg, At) * dx
-    - inner(cross(u_b_avg, B_avg), At) * dx
-    #B
-    + inner(B_avg, Bt) * dx
-    - inner(curl(A_avg), Bt) * dx
-    #j 
-    + inner(j_avg, jt) * dx
-    - inner(B_avg, curl(jt)) * dx
+    + inner(u_b, u_bt) * dx
+    + alpha**2 * inner(curl(u_b), curl(u_bt)) * dx
+    - inner(u, u_bt) * dx
+    # w
+    + inner(w, wt) * dx
+    - inner(scurl(u), wt) * dx
+    # B
+    + inner(vcurl(E), Bt) * dx
+    # E
+    + inner(E, Et) * dx
+    + inner(scross(u_b, H), Et) * dx
+    - eta * inner(j, Et) * dx
+    # j 
+    + inner(j, jt) * dx
+    - inner(B, vcurl(jt)) * dx
+    # H
+    + inner(H, Ht) * dx
+    - inner(B, Ht) * dx
+    )
+    return F
+
+
+# Crank Nicolson form
+F = (
+     inner(split(z)[0], split(z_test)[0])*dx
+   - inner(split(z_prev)[0], split(z_test)[0])*dx
+   + inner(split(z)[4], split(z_test)[4])*dx
+   - inner(split(z_prev)[4], split(z_test)[4])*dx
+   + 0.5*dt*(form(z, z_test) + form(z_prev, z_test))
 )
 
+
 dirichlet_ids = ("on_boundary",)
-bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids]
+#bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids]
 bcs = None
 
-(u_, P_, w_, u_b_, w_b_, A_, B_, j_) = z.subfunctions
+(u_, P_, u_b_, w_, B_, E_, j_, H_) = z.subfunctions
 u_.rename("Velocity")
 P_.rename("Pressure")
 u_b_.rename("filteredVelocity")
 w_.rename("Vorticity")
 B_.rename("MagneticField")
-A_.rename("MagneticPotential")
+E_.rename("ElectricField")
 j_.rename("Current")
+H_.rename("HcurlMagnetic")
 
 pvd = VTKFile("output/mhd-alpha.pvd")
 
+def helicity_m(B):
+    # 2D is trivially 0
+    return float(0)
 
 def norm_inf(u):
     with u.dat.vec_ro as u_v:
@@ -281,14 +309,16 @@ if mesh.comm.rank == 0:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
 
-u_b, w_b = u_b_solver(z_prev.sub(0))
-energy = energy_uB(z_prev.sub(0), u_b, z_prev.sub(6)) #u, u_b, B
-crosshelicity = helicity_c(z_prev.sub(0), z_prev.sub(6)) # u, B
-A_fn, maghelicity = helicity_m(z_prev.sub(6)) # B
-divu = div_u(z_prev.sub(0))
-divB = div_B(z_prev.sub(6))
+#z_mean = Function(Z)
+#z_mean.assign(0.5*(z + z_prev))
+u_b = u_b_solver(z.sub(0))
+energy = energy_uB(z.sub(0), z.sub(0), z.sub(4)) #u, u_b, B
+crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, u_b, B
+maghelicity = helicity_m(z.sub(4)) # B
+divu = div_u(z.sub(0))
+divB = div_B(z.sub(4))
 # monitor
-w_max, j_max, ens_total = compute_ens(z_prev.sub(2), z_prev.sub(7)) # w, j
+w_max, j_max, ens_total = compute_ens(z.sub(2), z.sub(6)) # w, j
 
 if mesh.comm.rank == 0:
     row = {
@@ -313,14 +343,17 @@ while (float(t) < float(T-dt)+1.0e-10):
     if mesh.comm.rank == 0:
         print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}, dofs = {dofs}, dofs_per_core = {dofs_per_core}", flush=True)
     solver.solve()
-    u_b, w_b= u_b_solver(z.sub(0)) 
-    energy = energy_uB(z.sub(0), u_b, z.sub(6)) #u, u_b, B
-    crosshelicity = helicity_c(z.sub(0), z.sub(6)) # u, u_b, B
-    A_fn, maghelicity = helicity_m(z.sub(6)) # B
+    u_b = u_b_solver(z.sub(0)) 
+    #z_mean.assign(0.5*(z + z_prev))
+    # half time evaluation
+    #energy = energy_uB(z_mean.sub(0),z.sub(2), z_mean.sub(4)) #u, u_b, B
+    energy = energy_uB(z.sub(0),z.sub(0), z.sub(4)) #u, u_b, B
+    crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u,  B
+    maghelicity = helicity_m(z.sub(4)) # B
     divu = div_u(z.sub(0))
-    divB = div_B(z.sub(6))
+    divB = div_B(z.sub(4))
     # monitor
-    w_max, j_max, ens_tol = compute_ens(z.sub(2), z.sub(7)) # w, j
+    w_max, j_max, ens_tol = compute_ens(z.sub(2), z.sub(6)) # w, j
 
 
 
@@ -343,7 +376,6 @@ while (float(t) < float(T-dt)+1.0e-10):
         print(row)
     
     if mesh.comm.rank == 0:
-        #spectrum_and_save(z.sub(0), A_fn, z.sub(4), float(t))  # 会写 CSV 并存图
         pvd.write(*z.subfunctions, time=float(t))
     timestep += 1
     z_prev.assign(z)
