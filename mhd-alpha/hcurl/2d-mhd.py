@@ -20,6 +20,9 @@ def div_u(u):
 def div_B(B):
     return norm(div(B), "L2")
 
+def potential_int_A(A):
+    return assemble(inner(A, A) * dx)
+
 def scross(x, y):
     return x[0]*y[1] - x[1]*y[0]
 
@@ -427,7 +430,7 @@ solver = NonlinearVariationalSolver(pb, solver_parameters = sp)
 
 timestep = 0
 data_filename = "output/data.csv"
-fieldnames = ["t", "divu", "divB", "energy", "helicity_c", "helicity_m", "ens_total", "w_max", "j_max"]
+fieldnames = ["t", "divu", "divB", "energy", "helicity_c", "helicity_m", "ens_total", "w_max", "j_max", "A_int"]
 # store the mesh info alpha and k_alpha
 if mesh.comm.rank == 0:
     alpha_val = mesh_sizes(mesh)[0]
@@ -448,6 +451,7 @@ if mesh.comm.rank == 0:
 energy = energy_uB(z.sub(2), z.sub(4)) #u_b, B
 crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, B
 A_fn, maghelicity = helicity_m(z.sub(4)) # B
+potential_A = potential_int_A(A_fn) # A
 divu = div_u(z.sub(0))
 divB = div_B(z.sub(4))
 # monitor
@@ -463,7 +467,8 @@ if mesh.comm.rank == 0:
         "helicity_m": float(maghelicity),
         "ens_total": float(ens_total),
         "w_max": float(w_max), 
-        "j_max": float(j_max), 
+        "j_max": float(j_max),
+        "A_int": float(potential_A),
     }
     with open(data_filename, "a", newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -479,6 +484,7 @@ while (float(t) < float(T-dt)+1.0e-10):
     energy = energy_uB(z.sub(2), z.sub(4)) #u_b, B
     crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, B
     A_fn, maghelicity = helicity_m(z.sub(4)) # B
+    potential_A = potential_int_A(A_fn) # A
     divu = div_u(z.sub(0))
     divB = div_B(z.sub(4))
     # monitor
@@ -497,6 +503,8 @@ while (float(t) < float(T-dt)+1.0e-10):
         "ens_total": float(ens_total),
         "w_max": float(w_max), 
         "j_max": float(j_max), 
+        "A_int": float(potential_A),
+
         }
         with open(data_filename, "a", newline='') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)

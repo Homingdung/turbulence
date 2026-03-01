@@ -1,8 +1,15 @@
-
-# plot_spectrum.py
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
+import argparse
+import numpy as np
+
+# ====== 0. 终端参数 ======
+parser = argparse.ArgumentParser(description="Plot spectrum at given time t")
+parser.add_argument("--t", type=float, default=1.8,
+                    help="Time to plot (default: 1.8)")
+args = parser.parse_args()
+t_plot = args.t
 
 # ====== 1. 路径 ======
 data_path = "output/spectrum_all.csv"
@@ -16,20 +23,21 @@ df = pd.read_csv(data_path)
 if "E_total" not in df.columns:
     df["E_total"] = df["E_u"] + df["E_B"]
 
-# ====== 3. 选最后一个时间步 ======
-t = df["t"].max()
-t_plot = 1.8
+# ====== 3. 选最接近的时间步 ======
 t_vals = df["t"].unique()
-t = t_vals[(abs(t_vals - t_plot)).argmin()]
+t = t_vals[(np.abs(t_vals - t_plot)).argmin()]
 df_t = df[df["t"] == t]
+
+print(f"Requested t = {t_plot}")
+print(f"Using nearest available t = {t}")
 
 k = df_t["k"].values
 E_u = df_t["E_u"].values
 E_B = df_t["E_B"].values
 E_tot = df_t["E_total"].values
-#H_mag = df_t["H_mag"].values
 H_cross = df_t["H_cross"].values
 E_A = df_t["E_A"].values
+
 # ====== 4. 读 k_alpha ======
 mesh_info = pd.read_csv(mesh_info_path)
 k_alpha = mesh_info["k_alpha"].iloc[0]
@@ -40,10 +48,8 @@ plt.loglog(k, E_u, label="Kinetic")
 plt.loglog(k, E_B, label="Magnetic")
 plt.loglog(k, E_A, label="MagneticPotential")
 plt.loglog(k, E_tot, "--", label="Total")
-#plt.loglog(k, H_mag, "-", label="MagneticHelicity")
-#plt.loglog(k, H_cross, "-", label="CrossHelicity")
 
-# ---- k^{-5/3} 参考线（对齐中间波数）----
+# ---- k^{-5/3} 参考线 ----
 k0 = k[len(k)//2]
 C = E_tot[len(k)//2] * (k0**(5/3))
 plt.loglog(k, C * k**(-5/3), ":", linewidth=2,
@@ -73,4 +79,3 @@ plt.show()
 plt.close()
 
 print(f"Saved spectrum plot to: {fig_path}")
-
