@@ -72,6 +72,7 @@ x, y = SpatialCoordinate(mesh)
 
 # spatial discretization
 Vg = VectorFunctionSpace(mesh, "CG", 2)
+Vg_ = FunctionSpace(mesh, "CG", 2)
 Q = FunctionSpace(mesh, "CG", 1)
 Vd = FunctionSpace(mesh, "RT", 1)
 Vc = FunctionSpace(mesh, "N1curl", 1)
@@ -104,7 +105,10 @@ psi = cos(2 * x + 2.3) + cos(y + 4.1)
 
 u_init = v_grad(psi)
 B_init = v_grad(phi)
-  
+# v_grad = -vcurl
+# A = -phi
+A_init = -phi
+
 alpha = CellDiameter(mesh)
 def energy_uB(u_b, B):
     return 0.5 * assemble(inner(u_b, u_b) * dx + alpha **2 * inner(curl(u_b), curl(u_b)) * dx + S * inner(B, B) * dx)
@@ -220,16 +224,18 @@ H_avg = H
 w_avg = w
 E_avg = E
 
-def spectrum_and_save(u, B, tval,
+def spectrum_and_save(u, B, A, tval,
                       save_dir="output",
                       aggregate_filename="spectrum_all.csv",
                       per_timestep_files=True):
     """
-    计算谱并保存为 CSV，增加 cross helicity 谱。
+    计算谱并保存为 CSV，增加 cross helicity 谱和标量 A 的能量谱。
     - u, B: Function (2D vector) at current time, 支持 .at([x,y])
+    - A:   Function (2D scalar) at current time, 支持 .at([x,y])
+           （表示磁矢势或任意标量场，计算 ∫ A^2 dx 的谱分布）
     - tval: 当前时间（float）
     - save_dir, aggregate_filename, per_timestep_files: 同原来
-    返回：k (1..kmax-1), E_u[1:], E_B[1:], H_cross[1:]
+    返回：k (1..kmax-1), E_u[1:], E_B[1:], H_cross[1:], E_A[1:]
     注意：保持原有 FFT / 归一化 约定（未除以 N**2 或体积）。
     """
     # 只让主进程写文件
@@ -244,6 +250,7 @@ def spectrum_and_save(u, B, tval,
     # 采样并做 FFT
     u_vals = np.zeros((N, N, 2), dtype=float)
     B_vals = np.zeros((N, N, 2), dtype=float)
+    A_vals = np.zeros((N, N), dtype=float)
 
     for i in range(N):
         xi = x[i]
@@ -251,6 +258,7 @@ def spectrum_and_save(u, B, tval,
             yj = y[j]
             u_vals[i, j, :] = u.at([xi, yj])
             B_vals[i, j, :] = B.at([xi, yj])
+            A_vals[i, j] = A.at([xi, yj])
 
     # 组件 FFT（注意：二维场，但仍用 fftn）
     uhat_x = np.fft.fftn(u_vals[:, :, 0])
@@ -258,6 +266,8 @@ def spectrum_and_save(u, B, tval,
 
     Bhat_x = np.fft.fftn(B_vals[:, :, 0])
     Bhat_y = np.fft.fftn(B_vals[:, :, 1])
+
+    Ahat = np.fft.fftn(A_vals)
 
     # 波数网格（与原来一致）
     kx = np.fft.fftfreq(N, d=2*np.pi/N) * 2*np.pi
@@ -268,6 +278,7 @@ def spectrum_and_save(u, B, tval,
     # modal energies
     E_u_k = 0.5 * (np.abs(uhat_x)**2 + np.abs(uhat_y)**2)
     E_B_k = 0.5 * (np.abs(Bhat_x)**2 + np.abs(Bhat_y)**2)
+    E_A_k = 0.5 * (np.abs(Ahat)**2)               # 标量 A 的每模能量，对应 ∫ A^2 dx 的谱分布
 
     # cross helicity per mode: Re( û · conj(B̂) )
     H_cross_mode = np.real(uhat_x * np.conj(Bhat_x) + uhat_y * np.conj(Bhat_y))
@@ -276,6 +287,7 @@ def spectrum_and_save(u, B, tval,
     kmax = int(np.max(K)) + 1
     E_u = np.zeros(kmax, dtype=float)
     E_B = np.zeros(kmax, dtype=float)
+    E_A = np.zeros(kmax, dtype=float)
     H_cross = np.zeros(kmax, dtype=float)
 
     for kk in range(kmax):
@@ -283,11 +295,13 @@ def spectrum_and_save(u, B, tval,
         if np.any(mask):
             E_u[kk] = np.sum(E_u_k[mask])
             E_B[kk] = np.sum(E_B_k[mask])
+            E_A[kk] = np.sum(E_A_k[mask])
             H_cross[kk] = np.sum(H_cross_mode[mask])
         else:
             # 没有模式也保持 0
             E_u[kk] = 0.0
             E_B[kk] = 0.0
+            E_A[kk] = 0.0
             H_cross[kk] = 0.0
 
     # k 从 1 开始更有意义（跳过 k=0）
@@ -296,37 +310,45 @@ def spectrum_and_save(u, B, tval,
     # prepare output dir
     os.makedirs(save_dir, exist_ok=True)
 
-    # 每时间步单文件（包含 H_cross）
+    # 每时间步单文件（包含 H_cross 和 E_A）
     if per_timestep_files:
         fname = os.path.join(save_dir, f"spectrum_t={tval:.6f}.csv")
         with open(fname, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["k", "E_u", "E_B", "H_cross", "E_total", "t"])
+            writer.writerow(["k", "E_u", "E_B", "E_A", "H_cross", "E_total_ub", "E_total_all", "t"])
             for kk in k_arr:
+                E_total_ub = float(E_u[kk] + E_B[kk])              # 原来的 u+B 总能量
+                E_total_all = float(E_u[kk] + E_B[kk] + E_A[kk])   # u+B+A 的整体能量（可选）
                 writer.writerow([int(kk),
                                  float(E_u[kk]),
                                  float(E_B[kk]),
+                                 float(E_A[kk]),
                                  float(H_cross[kk]),
-                                 float(E_u[kk] + E_B[kk]),
+                                 E_total_ub,
+                                 E_total_all,
                                  float(tval)])
 
-    # 追加到汇总长表（包含 H_cross 列）
+    # 追加到汇总长表（包含 H_cross 和 E_A 列）
     agg_path = os.path.join(save_dir, aggregate_filename)
     file_exists = os.path.exists(agg_path)
     with open(agg_path, "a", newline="") as f:
         writer = csv.writer(f)
         if not file_exists:
-            writer.writerow(["t", "k", "E_u", "E_B", "H_cross", "E_total"])
+            writer.writerow(["t", "k", "E_u", "E_B", "E_A", "H_cross", "E_total_ub", "E_total_all"])
         for kk in k_arr:
+            E_total_ub = float(E_u[kk] + E_B[kk])
+            E_total_all = float(E_u[kk] + E_B[kk] + E_A[kk])
             writer.writerow([float(tval),
                              int(kk),
                              float(E_u[kk]),
                              float(E_B[kk]),
+                             float(E_A[kk]),
                              float(H_cross[kk]),
-                             float(E_u[kk] + E_B[kk])])
+                             E_total_ub,
+                             E_total_all])
 
-    # 返回便于进一步处理
-    return k_arr, E_u[1:], E_B[1:], H_cross[1:]
+    # 返回便于进一步处理：多返回 E_A
+    return k_arr, E_u[1:], E_B[1:], H_cross[1:], E_A[1:]
 
 F = (
     # u
@@ -376,8 +398,19 @@ H_.rename("HcurlMagnetic")
 pvd = VTKFile("output/mhd-alpha.pvd")
 
 def helicity_m(B):
-    # 2D is trivially 0
-    return float(0)
+    A = Function(Vg_)
+    v = TestFunction(Vg_)
+    F_curl  = inner(vcurl(A), vcurl(v)) * dx - inner(B, vcurl(v)) * dx
+    sp_helicity = {  
+           "ksp_type":"gmres",
+           "pc_type": "ilu",
+    #"pc_factor_mat_solver_type": "mumps",
+    }
+    bcs_curl = [DirichletBC(Vg_, 0, "on_boundary")]
+    pb_curl = NonlinearVariationalProblem(F_curl, A, bcs_curl)
+    solver_curl= NonlinearVariationalSolver(pb_curl, solver_parameters = sp_helicity, options_prefix = "solver_curlcurl")
+    solver_curl.solve()
+    return A, 0
 
 def norm_inf(u):
     with u.dat.vec_ro as u_v:
@@ -414,7 +447,7 @@ if mesh.comm.rank == 0:
 
 energy = energy_uB(z.sub(2), z.sub(4)) #u_b, B
 crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, B
-maghelicity = helicity_m(z.sub(4)) # B
+A_fn, maghelicity = helicity_m(z.sub(4)) # B
 divu = div_u(z.sub(0))
 divB = div_B(z.sub(4))
 # monitor
@@ -445,7 +478,7 @@ while (float(t) < float(T-dt)+1.0e-10):
     solver.solve()
     energy = energy_uB(z.sub(2), z.sub(4)) #u_b, B
     crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, B
-    maghelicity = helicity_m(z.sub(4)) # B
+    A_fn, maghelicity = helicity_m(z.sub(4)) # B
     divu = div_u(z.sub(0))
     divB = div_B(z.sub(4))
     # monitor
@@ -472,7 +505,7 @@ while (float(t) < float(T-dt)+1.0e-10):
         print(row)
     
     if mesh.comm.rank == 0:
-        spectrum_and_save(z.sub(0), z.sub(4), float(t))  # 会写 CSV 并存图
+        spectrum_and_save(z.sub(0), z.sub(4), A_fn, float(t))  # u, B, A
     pvd.write(*z.subfunctions, time=float(t))
     timestep += 1
     z_prev.assign(z)

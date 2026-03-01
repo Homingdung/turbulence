@@ -29,7 +29,7 @@ E_B = df_t["E_B"].values
 E_tot = df_t["E_total"].values
 #H_mag = df_t["H_mag"].values
 H_cross = df_t["H_cross"].values
-
+E_A = df_t["E_A"].values
 # ====== 4. 读 k_alpha ======
 mesh_info = pd.read_csv(mesh_info_path)
 k_alpha = mesh_info["k_alpha"].iloc[0]
@@ -38,6 +38,7 @@ k_alpha = mesh_info["k_alpha"].iloc[0]
 plt.figure(figsize=(6,4))
 plt.loglog(k, E_u, label="Kinetic")
 plt.loglog(k, E_B, label="Magnetic")
+plt.loglog(k, E_A, label="MagneticPotential")
 plt.loglog(k, E_tot, "--", label="Total")
 #plt.loglog(k, H_mag, "-", label="MagneticHelicity")
 #plt.loglog(k, H_cross, "-", label="CrossHelicity")
