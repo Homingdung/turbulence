@@ -6,6 +6,9 @@ import numpy as np
 from mpi4py import MPI
 import matplotlib.pyplot as plt
 import os
+
+ic = "tgv" # tgv or abc
+
 nu = Constant(0)
 eta = Constant(0)
 S = Constant(1)
@@ -80,16 +83,28 @@ z_prev = Function(Z)
 #B2 = cos(pi*x)*sin(pi*y)
 #B_init = as_vector([B1, B2, 0])
 
+if ic=="abc":
 # ABC flow
-A0 = Constant(1)
-B0 = Constant(1)
-C0 = Constant(1)
-u1 = A0 * sin(z0) + C0 * cos(y)
-u2 = B0 * sin(x) + A0 * cos(z0)
-u3 = C0 * sin(y) + B0 * cos(x)
+    A0 = Constant(1)
+    B0 = Constant(1)
+    C0 = Constant(1)
+    u1 = A0 * sin(z0) + C0 * cos(y)
+    u2 = B0 * sin(x) + A0 * cos(z0)
+    u3 = C0 * sin(y) + B0 * cos(x)
 
-u_init = as_vector([u1, u2, u3])
-B_init = as_vector([u1, u2, u3])
+    u_init = as_vector([u1, u2, u3])
+    B_init = as_vector([u1, u2, u3])
+
+elif ic=="tgv":
+    u0 = sin(x) * cos(y) * cos(z0)
+    u1 = -cos(x) * sin(y) * cos(z0)
+    u_init = as_vector([u0, u1, 0])
+    
+    B0 = sin(x) * cos(y) * cos(z0)
+    B1 = cos(x) * sin(y) * cos(z0)
+    
+    B_init = as_vector([B0, B1, 0])
+
 
 # compute the value of meshsize alpha
 def mesh_sizes(mh):
@@ -384,6 +399,7 @@ j_.rename("Current")
 H_.rename("HcurlMagnetic")
 
 pvd = VTKFile("output/mhd-alpha.pvd")
+pvd2 = VTKFile("output/wj_cg.pvd")
 
 def helicity_m(B):
     A = Function(Vc)
@@ -457,6 +473,8 @@ if mesh.comm.rank == 0:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writerow(row)
 
+w_cg = Function(Vg, name = "vorticityCG")
+j_cg = Function(Vg, name = "currentCG")
 while (float(t) < float(T-dt)+1.0e-10):
     t.assign(t+dt)
     dofs = Z.dim()
@@ -494,7 +512,11 @@ while (float(t) < float(T-dt)+1.0e-10):
     
     if mesh.comm.rank == 0:
         spectrum_and_save(z.sub(0), A_fn, z.sub(4), float(t))  # 会写 CSV 并存图
+    
+    w_cg.interpolate(z.sub(2))
+    j_cg.interpolate(z.sub(6))
     pvd.write(*z.subfunctions, time=float(t))
+    pvd2.write(w_cg, j_cg, time=float(t))
     timestep += 1
     z_prev.assign(z)
 
