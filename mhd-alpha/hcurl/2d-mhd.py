@@ -8,6 +8,13 @@ from mpi4py import MPI
 import matplotlib.pyplot as plt
 from mpi4py import MPI
 
+def build_linear_solver(a, L, u_sol, bcs, aP=None, solver_parameters = None, options_prefix=None):
+    problem = LinearVariationalProblem(a, L, u_sol, bcs=bcs, aP=aP)
+    solver = LinearVariationalSolver(problem,
+                                     solver_parameters=solver_parameters,
+                                     options_prefix=options_prefix)
+    return solver
+
 nu = Constant(0)
 eta = Constant(0)
 S = Constant(1)
@@ -94,7 +101,7 @@ star = {
     }
 }
 
-sp = star
+sp = lu
 
 # spatial parameters
 baseN = 32
@@ -442,14 +449,82 @@ def helicity_m(B):
     v = TestFunction(Vg_)
     F_curl  = inner(vcurl(A), vcurl(v)) * dx - inner(B, vcurl(v)) * dx
     sp_helicity = {  
-           "ksp_type":"gmres",
-           "pc_type": "ilu",
-    #"pc_factor_mat_solver_type": "mumps",
+           "ksp_type":"preonly",
+           "pc_type": "lu",
+            "pc_factor_mat_solver_type": "mumps",
     }
     bcs_curl = [DirichletBC(Vg_, 0, "on_boundary")]
     pb_curl = NonlinearVariationalProblem(F_curl, A, bcs_curl)
     solver_curl= NonlinearVariationalSolver(pb_curl, solver_parameters = sp_helicity, options_prefix = "solver_curlcurl")
     solver_curl.solve()
+    return A, 0
+
+def helicity_pb(B):
+    # Spaces for magnetic potential computation
+    # If using periodic boundary conditions, we need to modify
+    # this to account for the harmonic form [0, 0, 1]^T
+    # using Yang's solver
+
+    u = TrialFunction(Vg_)
+    v = TestFunction(Vg_)
+    u_sol = Function(Vg_)
+
+    # weak form of curl-curl problem 
+    a = inner(vcurl(u), vcurl(v)) * dx
+    L = inner(B, vcurl(v)) * dx
+    beta = Constant(0.1)
+    Jp_curl = a + inner(beta * u, v) * dx
+    bcs_curl = [DirichletBC(Vg_, 0, subdomain) for subdomain in dirichlet_ids]
+
+    rtol = 1E-8
+    preconditioner = True
+    if preconditioner:
+        pc_type = "cholesky"
+    else:
+        pc_type = "none"
+    sparams = {
+        "snes_type": "ksponly",
+        # "ksp_type": "lsqr",
+        "ksp_type": "minres",
+        "ksp_max_it": 1000,
+        "ksp_convergence_test": "skip",
+        #"ksp_monitor": None,
+        "pc_type": pc_type,
+        "ksp_norm_type": "preconditioned",
+        "ksp_minres_nutol": 1E-8,
+        }
+
+
+    solver = build_linear_solver(a, L, u_sol, bcs_curl, Jp_curl, sparams, options_prefix="helicity")
+    return solver
+
+def riesz_map(functional):
+    function = Function(functional.function_space().dual())
+    with functional.dat.vec as x, function.dat.vec as y:
+        helicity_solver.snes.ksp.pc.apply(x, y)
+    return function
+
+def helicity_m(B):
+    helicity_solver = helicity_pb(B)
+    helicity_solver.solve()
+    problem = helicity_solver._problem
+    if helicity_solver.snes.ksp.getResidualNorm() > 0.01:
+        # lifting strategy
+        r = assemble(problem.F, bcs=problem.bcs)
+        rstar = r.riesz_representation(riesz_map=riesz_map, bcs=problem.bcs)
+        rstar.rename("RHS")
+        # lft = uh - inner(r, uh)/inner(r, rstar) * rstar
+        c = assemble(action(r, problem.u)) / assemble(action(r, rstar))
+        ulft = Function(Vg_, name="u_lifted")
+        ulft.assign(problem.u - c * rstar)
+        A = ulft
+    else:
+        A = problem.u
+    diff = norm(curl(A) - B, "L2")
+    if mesh.comm.rank == 0:
+        print(f"magnetic potential: ||curl(A) - B||_L2 = {diff:.8e}", flush=True)
+    A_ = Function(Vg_, name="MagneticPotential")
+    A_.project(A)
     return A, 0
 
 def norm_inf(u):
