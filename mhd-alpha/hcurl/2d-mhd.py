@@ -105,7 +105,7 @@ sp = lu
 
 # spatial parameters
 baseN = 32
-nref = 2
+nref = 1
 Lx = 3
 Ly = 1
 
@@ -258,7 +258,7 @@ def project_ic(B_init):
 
 u_b_init = u_b_solver(u_init)
 z_prev.sub(0).interpolate(u_init)
-z_prev.sub(4).interpolate(project_ic(B_init))  # B component
+z_prev.sub(4).interpolate(B_init)  # B component
 z_prev.sub(2).interpolate(u_b_init)
 z.assign(z_prev)
 
@@ -444,7 +444,7 @@ H_.rename("HcurlMagnetic")
 
 pvd = VTKFile("output/mhd-alpha.pvd")
 
-def helicity_m(B):
+def helicity_m_(B):
     A = Function(Vg_)
     v = TestFunction(Vg_)
     F_curl  = inner(vcurl(A), vcurl(v)) * dx - inner(B, vcurl(v)) * dx

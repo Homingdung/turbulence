@@ -56,13 +56,7 @@ plt.loglog(k, C * k**(-5/3), ":", linewidth=2,
            label=r"$k^{-5/3}$")
 
 # ---- k_alpha 竖线 ----
-plt.axvline(
-    k_alpha,
-    color="red",
-    linestyle="--",
-    linewidth=2,
-    label=rf"$k_\alpha = {k_alpha:.2f}$"
-)
+#plt.axvline(k_alpha,color="red",linestyle="--",linewidth=2,label=rf"$k_\alpha = {k_alpha:.2f}$")
 
 plt.xlabel(r"$k$")
 plt.ylabel(r"$E(k)$")
