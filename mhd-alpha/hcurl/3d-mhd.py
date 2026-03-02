@@ -2,10 +2,11 @@
 # helicity, cross helicity, energy
 from firedrake import *
 import csv
+import os
 import numpy as np
 from mpi4py import MPI
 import matplotlib.pyplot as plt
-import os
+from mpi4py import MPI
 
 ic = "tgv" # tgv or abc
 
@@ -39,15 +40,55 @@ lu = {
     "telescope_pc_factor_mat_solver_type": "mumps",
     "telescope_pc_factor_mat_mumps_icntl_14": ICNTL_14,
 }
-sp = lu
+star = {
+    "snes_type": "newtonls",
+    "snes_monitor": None,
+    "ksp_monitor": None,
+    "ksp_type": "fgmres",
+    "ksp_converged_reason": None,
+    "ksp_gmres_restart": 100,
+    #"snes_rtol": 1.e-10,#
+    #"snes_atol": 1.e-10,#
+    "ksp_rtol": 1.e-8,
+    "pc_type": "mg",
+    "mg_levels": {
+        "ksp_type": "chebyshev",
+        "ksp_chebyshev_esteig": "0,0.25,0,1.2",
+        #"ksp_chebyshev_esteig": "1.0,0.0,0,1.0",# Pablo
+        #"ksp_chebyshev_kind": "opt_fourth",
+        "ksp_convergence_test": "skip",
+        "ksp_max_it": 2,
+        "pc_type": "python",
+        "pc_python_type": "firedrake.ASMStarPC",
+        "pc_star_construct_dim": 0,
+        "pc_star_backend_type": "tinyasm"
+    },
+    "mg_coarse": {
+        "ksp_type": "preonly",
+        "pc_type": "telescope",
+        "pc_telescope_reduction_factor": tele_reduc_fac,
+        "pc_telescope_subcomm_type": "contiguous",
+        "telescope_pc_type": "lu",
+        "telescope_pc_factor_mat_solver_type": "mumps",
+        "telescope_pc_factor_mat_mumps_icntl_14": ICNTL_14,
+    }
+}
+
+
+
+sp = star
 
 # spatial parameters
 baseN = 4
 nref = 0
-mesh = PeriodicUnitCubeMesh(baseN, baseN, baseN)
-mesh.coordinates.dat.data[:] *= 2 * pi
 
-x, y, z0 = SpatialCoordinate(mesh)
+dp={"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
+base = PeriodicUnitCubeMesh(baseN, baseN, baseN, distribution_parameters=dp)
+mh = MeshHierarchy(base, nref, distribution_parameters = dp)
+for m in mh:
+    m.coordinates.dat.data[:] *= 2 * pi
+mesh = mh[-1]
+x, y ,z0= SpatialCoordinate(mesh)
 
 # spatial discretization
 Vg = VectorFunctionSpace(mesh, "CG", 1)
