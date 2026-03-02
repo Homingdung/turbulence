@@ -9,8 +9,8 @@ import os
 
 ic = "tgv" # tgv or abc
 
-nu = Constant(0)
-eta = Constant(0)
+nu = Constant(1e-4)
+eta = Constant(1e-4)
 S = Constant(1)
 
 def helicity_c(u, B):
@@ -50,7 +50,7 @@ mesh.coordinates.dat.data[:] *= 2 * pi
 x, y, z0 = SpatialCoordinate(mesh)
 
 # spatial discretization
-Vg = VectorFunctionSpace(mesh, "CG", 2)
+Vg = VectorFunctionSpace(mesh, "CG", 1)
 Q = FunctionSpace(mesh, "CG", 1)
 Vd = FunctionSpace(mesh, "RT", 1)
 Vc = FunctionSpace(mesh, "N1curl", 1)
@@ -221,7 +221,7 @@ E_avg = E
 def spectrum_and_save(u, A, B, tval,
                       save_dir="output",
                       aggregate_filename="spectrum_all.csv",
-                      per_timestep_files=True):
+                      per_timestep_files=False):
     """
     计算并保存：
       - 动能谱 E_u(k)

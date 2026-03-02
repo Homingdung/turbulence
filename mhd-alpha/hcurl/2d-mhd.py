@@ -230,7 +230,7 @@ E_avg = E
 def spectrum_and_save(u, B, A, tval,
                       save_dir="output",
                       aggregate_filename="spectrum_all.csv",
-                      per_timestep_files=True):
+                      per_timestep_files=False):
     """
     计算谱并保存为 CSV，增加 cross helicity 谱和标量 A 的能量谱。
     - u, B: Function (2D vector) at current time, 支持 .at([x,y])
