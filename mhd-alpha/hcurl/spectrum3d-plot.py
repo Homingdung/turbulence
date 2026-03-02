@@ -3,6 +3,15 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
+import argparse
+import numpy as np
+
+# ====== 0. 终端参数 ======
+parser = argparse.ArgumentParser(description="Plot spectrum at given time t")
+parser.add_argument("--t", type=float, default=0.30,
+                    help="Time to plot (default: 0.30)")
+args = parser.parse_args()
+t_plot = args.t
 
 # ====== 1. 路径 ======
 data_path = "output/spectrum_all.csv"
@@ -17,10 +26,8 @@ if "E_total" not in df.columns:
     df["E_total"] = df["E_u"] + df["E_B"]
 
 # ====== 3. 选最后一个时间步 ======
-t = df["t"].max()
-#t_plot = 1.5
-#t_vals = df["t"].unique()
-#t = t_vals[(abs(t_vals - t_plot)).argmin()]
+t_vals = df["t"].unique()
+t = t_vals[(np.abs(t_vals - t_plot)).argmin()]
 df_t = df[df["t"] == t]
 
 k = df_t["k"].values
