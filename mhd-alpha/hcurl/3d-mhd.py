@@ -8,8 +8,7 @@ from mpi4py import MPI
 import matplotlib.pyplot as plt
 from mpi4py import MPI
 
-ic = "sp" # tgv or abc, sp
-
+ic = "ozt" # tgv or abc, sp, ozt
 nu = Constant(0)
 eta = Constant(0)
 S = Constant(1)
@@ -146,6 +145,18 @@ elif ic=="sp":
     B1 = -sin(pi*x)*cos(pi*y)
     B2 = cos(pi*x)*sin(pi*y)
     B_init = as_vector([B1, B2, 0])
+
+elif ic=="ozt":
+    # initial condition Politano-1995
+    u1 = -2 * sin(y)
+    u2 = 2 * sin(x)
+    u3 = 0
+    u_init = as_vector([u1, u2, 0])
+
+    B1 = 0.8 * ((-2) * sin(2*y) + sin(z0))
+    B2 = 0.8 * (2 * sin(x) + sin(z0))
+    B3 = 0.8 * (sin(x) + sin(y))
+    B_init = as_vector([B1, B2, B3])
 
 # compute the value of meshsize alpha
 def mesh_sizes(mh):
