@@ -47,11 +47,6 @@ baseN = 4
 nref = 0
 
 mesh = UnitCubeMesh(baseN, baseN, baseN)
-mesh.coordinates.dat.data[:, 0] -= 0.5  # Shift x-coordinates by -0.5
-mesh.coordinates.dat.data[:, 1] -= 0.5  # Shift y-coordinates by -0.5
-mesh.coordinates.dat.data[:, 2] -= 0.5  # Shift z-coordinates by -0.5
-
-x, y ,z0= SpatialCoordinate(mesh)
 
 # spatial discretization
 Vg = VectorFunctionSpace(mesh, "CG", 1)
@@ -80,7 +75,8 @@ z_prev = Function(Z)
 (up, Pp, u_bp, wp, Bp, Ep, jp, Hp) = split(z_prev)
 
 if ic=="abc":
-# ABC flow
+    x, y ,z0= SpatialCoordinate(mesh)
+    # ABC flow
     A0 = Constant(1)
     B0 = Constant(1)
     C0 = Constant(1)
@@ -92,6 +88,8 @@ if ic=="abc":
     B_init = as_vector([u1, u2, u3])
 
 elif ic=="tgv":
+    x, y ,z0= SpatialCoordinate(mesh)
+
     u0 = sin(x) * cos(y) * cos(z0)
     u1 = -cos(x) * sin(y) * cos(z0)
     u_init = as_vector([u0, u1, 0])
@@ -102,13 +100,21 @@ elif ic=="tgv":
     B_init = as_vector([B0, B1, 0])
 
 elif ic=="sp":
+    mesh.coordinates.dat.data[:, 0] -= 0.5  # Shift x-coordinates by -0.5
+    mesh.coordinates.dat.data[:, 1] -= 0.5  # Shift y-coordinates by -0.5
+    mesh.coordinates.dat.data[:, 2] -= 0.5  # Shift z-coordinates by -0.5
+
+    x, y ,z0= SpatialCoordinate(mesh)
+
    # helicityhu ic sp test
+    R = FunctionSpace(mesh, "R", 0)
+    zero = Function(R).assign(0)
     u1 = -sin(pi*(x-1/2))*cos(pi*(y-1/2))*z0*(z0-1)
     u2 = cos(pi*(x-1/2))*sin(pi*(y-1/2))*z0*(z0-1)
-    u_init = as_vector([u1, u2, 0])
+    u_init = as_vector([u1, u2, zero])
     B1 = -sin(pi*x)*cos(pi*y)
     B2 = cos(pi*x)*sin(pi*y)
-    B_init = as_vector([B1, B2, 0])
+    B_init = as_vector([B1, B2, zero])
 
 # compute the value of meshsize alpha
 def mesh_sizes(mh):
@@ -202,11 +208,19 @@ def project_ic(B_init):
  
     return zp.subfunctions[0]
 
-
 u_b_init = u_b_solver(u_init)
+B_proj = project_ic(B_init)
 z_prev.sub(0).interpolate(u_init)
 z_prev.sub(2).interpolate(u_b_init)
-z_prev.sub(4).interpolate(project_ic(B_init))  # B component
+z_prev.sub(4).interpolate(B_proj)  # B component
+
+j_init = curl(B_init)
+w_init = curl(u_init)
+E_init = - cross(u_b_init, B_init) + eta * j_init
+
+z_prev.sub(5).interpolate(E_init)  # B component
+z_prev.sub(3).interpolate(w_init)
+z_prev.sub(6).interpolate(j_init)
 z.assign(z_prev)
 
 u_avg = (u + up)/2
@@ -316,13 +330,13 @@ if mesh.comm.rank == 0:
         writer.writeheader()
 
 
-energy = energy_uB(z.sub(2), z.sub(4)) #u_b, B
-crosshelicity = helicity_c(z.sub(0), z.sub(4)) # u, B
-A_fn, maghelicity = helicity_m(z.sub(4)) # B
-divu = div_u(z.sub(0))
-divB = div_B(z.sub(4))
+energy = energy_uB(z_prev.sub(2), z_prev.sub(4)) #u_b, B
+crosshelicity = helicity_c(z_prev.sub(0), z_prev.sub(4)) # u, B
+A_fn, maghelicity = helicity_m(z_prev.sub(4)) # B
+divu = div_u(z_prev.sub(0))
+divB = div_B(z_prev.sub(4))
 # monitor
-w_max, j_max, ens_total = compute_ens(z.sub(2), z.sub(6)) # w, j
+w_max, j_max, ens_total = compute_ens(z_prev.sub(2), z_prev.sub(6)) # w, j
 
 if mesh.comm.rank == 0:
     row = {

@@ -5,9 +5,10 @@ import matplotlib.pyplot as plt
 data = pd.read_csv("output/data.csv")
 
 # 计算每个变量相对于第一步的差值
-#variables = ['energy', 'helicity_c', 'helicity_m']
-#variables = ['energy', 'helicity_c', 'helicity_m']
-variables = ['energy', 'helicity_c']
+variables = ['energy', 'helicity_c', 'helicity_m']
+#variables = ['helicity_m']
+#variables = ['energy']
+#variables = ['helicity_c']
 diff = data.copy()
 for v in variables:
     diff[v] = data[v] - data[v].iloc[0]
