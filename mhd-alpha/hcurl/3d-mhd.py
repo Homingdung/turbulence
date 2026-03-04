@@ -82,7 +82,7 @@ baseN = 4
 nref = 0
 
 dp={"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
-base = UnitCubeMesh(baseN, baseN, baseN, distribution_parameters=dp)
+base = PeriodicUnitCubeMesh(baseN, baseN, baseN, distribution_parameters=dp)
 mh = MeshHierarchy(base, nref, distribution_parameters = dp)
 for m in mh:
     m.coordinates.dat.data[:] *= 2 * pi
@@ -435,8 +435,8 @@ F = (
 )
 
 dirichlet_ids = ("on_boundary",)
-bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids]
-#bcs = None
+#bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids]
+bcs = None
 
 (u_, P_, u_b_, w_, B_, E_, j_, H_) = z.subfunctions
 u_.rename("Velocity")

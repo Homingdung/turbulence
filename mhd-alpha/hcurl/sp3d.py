@@ -47,6 +47,10 @@ baseN = 4
 nref = 0
 
 mesh = UnitCubeMesh(baseN, baseN, baseN)
+mesh.coordinates.dat.data[:, 0] -= 0.5  # Shift x-coordinates by -0.5
+mesh.coordinates.dat.data[:, 1] -= 0.5  # Shift y-coordinates by -0.5
+mesh.coordinates.dat.data[:, 2] -= 0.5  # Shift z-coordinates by -0.5
+
 x, y ,z0= SpatialCoordinate(mesh)
 
 # spatial discretization
@@ -202,7 +206,7 @@ def project_ic(B_init):
 u_b_init = u_b_solver(u_init)
 z_prev.sub(0).interpolate(u_init)
 z_prev.sub(2).interpolate(u_b_init)
-z_prev.sub(4).interpolate(B_init)  # B component
+z_prev.sub(4).interpolate(project_ic(B_init))  # B component
 z.assign(z_prev)
 
 u_avg = (u + up)/2
@@ -289,7 +293,7 @@ def compute_ens(w, j):
     j_max=norm_inf(j)
     return w_max, j_max, float(w_max) + float(j_max) 
 
-pb = NonlinearVariationalProblem(F, z)
+pb = NonlinearVariationalProblem(F, z, bcs)
 solver = NonlinearVariationalSolver(pb, solver_parameters = sp)
 
 timestep = 0
