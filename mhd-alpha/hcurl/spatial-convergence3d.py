@@ -58,8 +58,8 @@ for L in L_values:
     Vc = FunctionSpace(mesh, "N1curl", 1)
     Vn = FunctionSpace(mesh, "DG", 0)
 
-    alpha = CellDiameter(mesh)
-
+    #alpha = CellDiameter(mesh)
+    alpha = Constant(0.1)
     # (u, P, u_b, w, B, E, j, H)
     Z = MixedFunctionSpace([Vc, Q, Vc, Vc, Vd, Vc, Vc, Vc])
     z = Function(Z)
@@ -112,52 +112,51 @@ for L in L_values:
         return u_b
 
     # time 
-    t = Constant(0) 
+    t = Constant(0)
+    t_half = Constant(0)
     dt = Constant(0.1)
 
-    def h(x):
-        return (x**2 - x) **2
+    s  = sin(pi*x) * sin(pi*y) * sin(pi*z0)
+    sx = cos(pi*x) * sin(pi*y) * sin(pi*z0)
+    sy = sin(pi*x) * cos(pi*y) * sin(pi*z0)
+    sz = sin(pi*x) * sin(pi*y) * cos(pi*z0)
 
-    def h_d(x):
-        return 4 * x**3 - 6 * x **2 + 2 * x
+    phi = as_vector([sy - sz, sz - sx, sx - sy])
 
+# 注意 div(phi) = 0，因为 phi = curl([s,s,s])
 
-    g_1 = 4 - 2* t 
-    g_2 = 1 + t
-    g_3 = 1 - t
+    lmbda = 1 + 3 * alpha**2 * pi**2
+    mu    = Constant(0.5)   # B 的衰减率，与 nu=1 不同
 
-    g_1_t = -2
-    g_2_t = 1
-    g_3_t = -1
+    u_ex     = pi * exp(-nu * t_half) * phi
+    u_ex_t   = -nu * pi * exp(-nu * t_half) * phi          # du/dt
 
-    u_x = -g_1 * h_d(x) * h(y) * h(z0)
-    u_y = -g_2 * h(x) * h_d(y) * h(z0)
-    u_z = -g_3 * h(x) * h(y) * h_d(z0)
+    u_b_ex   = pi * exp(-nu * t_half) / lmbda * phi        # (I - alpha^2 Delta)^{-1} u
+    u_b_ex_t = -nu * pi * exp(-nu * t_half) / lmbda * phi  # du_b/dt（仅供参考，不直接用）
 
-    u_x_t = -g_1_t * h_d(x) * h(y) * h(z0)
-    u_y_t = -g_2_t * h(x) * h_d(y) * h(z0)
-    u_z_t = -g_3_t * h(x) * h(y) * h_d(z0)
+    B_ex     = pi * exp(-mu * t_half) * phi
+    B_ex_t   = -mu * pi * exp(-mu * t_half) * phi          # dB/dt
 
-    u_ex = as_vector([u_x, u_y, u_z])
-    u_exact_t = as_vector([u_x_t, u_y_t, u_z_t])
-    B_exact_t = curl(u_exact_t)
-    B_ex = curl(u_ex)
-    w_ex = Function(Vc).interpolate(curl(u_ex))
-    H_ex = Function(Vc).interpolate(B_ex)
-    j_ex = curl(B_ex) 
+    H_ex     = B_ex
+    j_ex     = curl(B_ex)                             # = curl(pi * exp(-mu*t) * phi)
+    w_ex     = curl(u_ex)                             # = curl(pi * exp(-nu*t) * phi)
 
-    u_b_ex = u_b_solver(u_ex)
-    E_ex = nu * j_ex - Function(Vc).interpolate(cross(u_b_ex, H_ex))
-    P_ex =h(x) * h(y) * h(z0)
-
+    E_ex     = (1/eta) * j_ex - cross(u_b_ex, H_ex)
+    P_ex     = Constant(0)     
+    
     # source term
-    f1 = u_exact_t - cross(u_b_ex, w_ex) + nu * curl(curl(u_ex)) - S * cross(j_ex, H_ex) + grad(P_ex)
-    f2 = B_exact_t + curl(E_ex)
+    f1 = u_ex_t - cross(u_b_ex, w_ex) + nu * curl(curl(u_ex)) - S * cross(j_ex, H_ex) 
+    f2 = B_ex_t + curl(E_ex)
     f3 = E_ex + cross(u_b_ex, H_ex) - eta * j_ex
 
     z_prev.sub(0).interpolate(u_ex)
+    z_prev.sub(1).interpolate(P_ex)
     z_prev.sub(2).interpolate(u_b_ex)
+    z_prev.sub(3).interpolate(w_ex)
     z_prev.sub(4).interpolate(B_ex) 
+    z_prev.sub(5).interpolate(E_ex) 
+    z_prev.sub(6).interpolate(j_ex) 
+    z_prev.sub(7).interpolate(H_ex) 
     z.assign(z_prev)
 
     u_avg = (u + up)/2
@@ -176,7 +175,7 @@ for L in L_values:
         + nu * inner(curl(u_avg), curl(ut)) * dx
         - S * inner(cross(j_avg, H_avg), ut) * dx
         # p
-        + inner(u_avg, grad(Pt)) * dx
+        + inner(u, grad(Pt)) * dx
         - inner(f1, ut) * dx
         # u_b
         + inner(u_b, u_bt) * dx
@@ -203,9 +202,8 @@ for L in L_values:
     )
 
     dirichlet_ids = ("on_boundary",)
-    #bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids]
     # (u, P, u_b, w, B, E, j, H)
-
+    
     bcs = [
         DirichletBC(Z.sub(0), u_ex, "on_boundary"),
         DirichletBC(Z.sub(1), P_ex, "on_boundary"),
@@ -217,10 +215,11 @@ for L in L_values:
         DirichletBC(Z.sub(7), H_ex, "on_boundary"), 
     ]
 
+    #bcs = [DirichletBC(Z.sub(index), 0, subdomain) for index in range(len(Z)) for subdomain in dirichlet_ids]
     pb = NonlinearVariationalProblem(F, z, bcs)
     solver = NonlinearVariationalSolver(pb, solver_parameters = sp)
-
     while (float(t) < float(T-dt)+1.0e-10):
+        t_half.assign(float(t) + 0.5 * float(dt))
         t.assign(t+dt)
         dofs = Z.dim()
         dofs_per_core = dofs / COMM_WORLD.size
@@ -231,11 +230,12 @@ for L in L_values:
         z_prev.assign(z)
 
     t.assign(T)
-    z_mean.assign(0.5 * (z + z_prev)) 
+    
+    #t.assign(T - dt/2)
+    #z_mean.assign(0.5 * (z + z_prev)) 
     u_error = norm(z.sub(0) - u_ex, "L2")
     B_error = norm(z.sub(4) - B_ex, "L2")
-    t.assign(T - dt/2)
-    P_error = norm(z_mean.sub(1) - P_ex, "L2")
+    P_error = norm(z.sub(1) - P_ex, "L2")
     print(f"error_u:{u_error}")
     print(f"error_P:{P_error}")
     print(f"error_B:{B_error}")

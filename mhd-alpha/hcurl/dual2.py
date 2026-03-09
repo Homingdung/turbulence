@@ -10,7 +10,28 @@ import os
 nu = Constant(0)
 eta = Constant(0)
 S = Constant(1)
+def scross(x, y):
+    return x[0]*y[1] - x[1]*y[0]
 
+
+def vcross(x, y):
+    return as_vector([x[1]*y, -x[0]*y])
+
+
+def scurl(x):
+    return x[1].dx(0) - x[0].dx(1)
+
+
+def vcurl(x):
+    return as_vector([x.dx(1), -x.dx(0)])
+
+
+def acurl(x):
+    return as_vector([
+                     x[2].dx(1),
+                     -x[2].dx(0),
+                     x[1].dx(0) - x[0].dx(1)
+                     ])
 def helicity_c(u, B):
     return assemble(inner(u, B)*dx)
 
@@ -23,6 +44,8 @@ def div_B(B):
 def energy_uB(u, u_b, B):
     return 0.5 * assemble(inner(u, u_b) * dx + S * inner(B, B) * dx)
 
+def compute_A(A):
+    return assemble(inner(A, A) * dx)
 
 # solver parameter
 ICNTL_14 = 5000
@@ -44,12 +67,12 @@ lu = {
 sp = lu
 
 # spatial parameters
-baseN = 4
+baseN = 100
 nref = 0
-mesh = PeriodicUnitCubeMesh(baseN, baseN, baseN)
+mesh = PeriodicUnitSquareMesh(baseN, baseN)
 mesh.coordinates.dat.data[:] *= 2 * pi
 
-x, y, z0 = SpatialCoordinate(mesh)
+x, y = SpatialCoordinate(mesh)
 
 # spatial discretization
 Vg = VectorFunctionSpace(mesh, "CG", 2)
@@ -60,14 +83,14 @@ Vn = FunctionSpace(mesh, "DG", 0)
 
 # time 
 t = Constant(0) 
-T = 1.0
-dt = Constant(0.01)
+T = 20.0
+dt = Constant(0.1)
 
 alpha = CellDiameter(mesh)
     
 
 # (u2, P3, w1, u_b2, w_b1, A1, B2, j1)
-Z = MixedFunctionSpace([Vd, Vn, Vc, Vd, Vc, Vc, Vd, Vc])
+Z = MixedFunctionSpace([Vd, Vn, Q, Vd, Q, Q, Vd, Q])
 z = Function(Z)
 z_test = TestFunction(Z)
 z_prev = Function(Z)
@@ -76,13 +99,21 @@ z_prev = Function(Z)
 (ut, Pt, wt, u_bt, w_bt, At, Bt, jt) = split(z_test)
 (up, Pp, wp, u_bp, w_bp, Ap, Bp, jp) = split(z_prev)
 
-u1 = -sin(pi*(x-1/2))*cos(pi*(y-1/2))*z0*(z0-1)
-u2 = cos(pi*(x-1/2))*sin(pi*(y-1/2))*z0*(z0-1)
-u_init = as_vector([u1, u2, 0])
-B1 = -sin(pi*x)*cos(pi*y)
-B2 = cos(pi*x)*sin(pi*y)
-B_init = as_vector([B1, B2, 0])
+# Biskamp-Welter-1989
+def v_grad(x):
+    return as_vector([-x.dx(1), x.dx(0)])
 
+phi = cos(x + 1.4) + cos(y + 0.5)
+psi = cos(2 * x + 2.3) + cos(y + 4.1)
+
+#phi = cos(x) + cos(y)
+#psi = 0.5* cos(2 * x) + cos(y)
+
+u_init = v_grad(psi)
+B_init = v_grad(phi)
+# v_grad = -vcurl
+# A = -phi
+A_init = -phi
 alpha = CellDiameter(mesh)
 
 # compute the value of meshsize alpha
@@ -98,7 +129,7 @@ def mesh_sizes(mh):
 
 # solve for u_b_init
 def u_b_solver(u):
-    Z_b = MixedFunctionSpace([Vd, Vc]) # u_b, w_b
+    Z_b = MixedFunctionSpace([Vd, Q]) # u_b, w_b
     z_b = Function(Z_b)
     z_t = TestFunction(Z_b)
 
@@ -107,11 +138,11 @@ def u_b_solver(u):
     F_b = (
         # u_b
           inner(u_b, u_bt) * dx
-        + alpha **2 * inner(curl(w_b), u_bt) * dx
+        + alpha **2 * inner(vcurl(w_b), u_bt) * dx
         - inner(u, u_bt) * dx
         # w_b
         + inner(w_b, w_bt) * dx
-        - inner(u_b, curl(w_bt)) * dx
+        - inner(u_b, vcurl(w_bt)) * dx
     )
 
     bcs0 = [
@@ -167,70 +198,58 @@ def project_ic(B_init):
     return zp.subfunctions[0]
 
 def helicity_m(B):
-    A = Function(Vc)
-    v = TestFunction(Vc)
-    F_curl  = inner(curl(A), curl(v)) * dx - inner(B, curl(v)) * dx
-    sp = {  
-           "ksp_type":"preonly",
-           "pc_type": "lu",
-           "pc_factor_mat_solver_type": "mumps",
-    }
-    bcs_curl = [DirichletBC(Vc, 0, "on_boundary")]
-    pb_curl = NonlinearVariationalProblem(F_curl, A, bcs_curl)
-    solver_curl= NonlinearVariationalSolver(pb_curl, solver_parameters = sp, options_prefix = "solver_curlcurl")
-    solver_curl.solve()
-    return A, assemble(inner(A, B)*dx)
+    return 0, 0
 
 u_init_proj = project_ic(u_init)
 u_b_init, w_b_init = u_b_solver(u_init_proj)
 B_init_proj = project_ic(B_init)
-A_init = helicity_m(B_init_proj)[0]
+#A_init = helicity_m(B_init_proj)[0]
 
 z_prev.sub(0).interpolate(u_init_proj)
 z_prev.sub(3).interpolate(u_b_init)
-z_prev.sub(4).interpolate(w_b_init)
+#z_prev.sub(4).interpolate(w_b_init)
 z_prev.sub(5).interpolate(A_init)  
-#z_prev.sub(6).interpolate(B_init)  
+#z_prev.sub(6).interpolate(B_init_proj)  
 z.assign(z_prev)
 
 u_avg = (u + up)/2
 A_avg = (A + Ap)/2
 B_avg = B 
-u_b_avg = u_b 
+u_b_avg = (u_b + u_bp)/2 
 P_avg = P
 j_avg = j
 w_avg = w
 w_b_avg = w_b
 
-F = 
+F =( 
     # u
       inner((u - up)/dt, ut) * dx
-    - inner(cross(u_b_avg, w_avg), ut) * dx # advection term
+    - inner(vcross(u_b_avg, w_avg), ut) * dx # advection term
     - inner(P_avg, div(ut)) * dx
-    + nu * inner(curl(w_avg), ut) * dx
-    - S * inner(cross(j_avg, B_avg), ut) * dx
+    + nu * inner(vcurl(w_avg), ut) * dx
+    + S * inner(vcross(B_avg, j_avg), ut) * dx
     # p
     - inner(div(u_avg), Pt) * dx
     # w  
     + inner(w_avg, wt) * dx
-    - inner(u_avg, curl(wt)) * dx
+    - inner(u_avg, vcurl(wt)) * dx
     # u_b
-    + inner(u_b_avg, u_bt) * dx
-    + alpha**2 * inner(curl(w_b_avg), u_bt) * dx
-    - inner(u_avg, u_bt) * dx
+    + inner(u_b, u_bt) * dx
+    + alpha**2 * inner(vcurl(w_b), u_bt) * dx
+    - inner(u, u_bt) * dx
     # w_b
     + inner(w_b_avg, w_bt) * dx
-    - inner(u_b_avg, curl(w_bt)) * dx
+    - inner(u_b_avg, vcurl(w_bt)) * dx
     # A
     + inner((A - Ap)/dt, At) * dx
     + eta * inner(j_avg, At) * dx
-    - inner(cross(u_b_avg, B_avg), At) * dx
+    - inner(scross(u_b_avg, B_avg), At) * dx
     #B
     + inner(B_avg, Bt) * dx
-    - inner(curl(A_avg), Bt) * dx
+    - inner(vcurl(A_avg), Bt) * dx
     #j 
     + inner(j_avg, jt) * dx
-    - inner(B_avg, curl(jt)) * dx
+    - inner(B_avg, vcurl(jt)) * dx
 )
 
 dirichlet_ids = ("on_boundary",)
@@ -259,12 +278,12 @@ def compute_ens(w, j):
     j_max=norm_inf(j)
     return w_max, j_max, float(w_max) + float(j_max) 
 
-pb = NonlinearVariationalProblem(F, z)
+pb = NonlinearVariationalProblem(F, z, bcs)
 solver = NonlinearVariationalSolver(pb, solver_parameters = sp)
 
 timestep = 0
 data_filename = "output/data.csv"
-fieldnames = ["t", "divu", "divB", "energy", "helicity_c", "helicity_m", "ens_total", "w_max", "j_max"]
+fieldnames = ["t", "divu", "divB", "energy", "helicity_c", "helicity_m", "ens_total", "w_max", "j_max", "A"]
 # store the mesh info alpha and k_alpha
 if mesh.comm.rank == 0:
     alpha_val = mesh_sizes(mesh)[0]
@@ -281,10 +300,11 @@ if mesh.comm.rank == 0:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
 
-u_b, w_b = u_b_solver(z_prev.sub(0))
-energy = energy_uB(z_prev.sub(0), u_b, z_prev.sub(6)) #u, u_b, B
+#u_b, w_b = u_b_solver(z_prev.sub(0))
+energy = energy_uB(z_prev.sub(0), z_prev.sub(3), z_prev.sub(6)) #u, u_b, B
 crosshelicity = helicity_c(z_prev.sub(0), z_prev.sub(6)) # u, B
 A_fn, maghelicity = helicity_m(z_prev.sub(6)) # B
+mean_square_potential = compute_A(z_prev.sub(5))
 divu = div_u(z_prev.sub(0))
 divB = div_B(z_prev.sub(6))
 # monitor
@@ -313,10 +333,12 @@ while (float(t) < float(T-dt)+1.0e-10):
     if mesh.comm.rank == 0:
         print(GREEN % f"Solving for t = {float(t):.4f}, dt = {float(dt)}, T = {T}, baseN = {baseN}, nref = {nref}, nu = {float(nu)}, dofs = {dofs}, dofs_per_core = {dofs_per_core}", flush=True)
     solver.solve()
-    u_b, w_b= u_b_solver(z.sub(0)) 
-    energy = energy_uB(z.sub(0), u_b, z.sub(6)) #u, u_b, B
+    #u_b, w_b= u_b_solver(z.sub(0)) 
+    energy = energy_uB(z.sub(0), z.sub(3), z.sub(6)) #u, u_b, B
     crosshelicity = helicity_c(z.sub(0), z.sub(6)) # u, u_b, B
     A_fn, maghelicity = helicity_m(z.sub(6)) # B
+    mean_square_potential = compute_A(z_prev.sub(5))
+
     divu = div_u(z.sub(0))
     divB = div_B(z.sub(6))
     # monitor
@@ -335,6 +357,7 @@ while (float(t) < float(T-dt)+1.0e-10):
         "ens_total": float(ens_total),
         "w_max": float(w_max), 
         "j_max": float(j_max), 
+        "A": float(mean_square_potential),
         }
         with open(data_filename, "a", newline='') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
