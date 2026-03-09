@@ -50,11 +50,11 @@ def run_simulation(dt, L):
     x, y ,z0= SpatialCoordinate(mesh)
 
     # spatial discretization
-    Vg = VectorFunctionSpace(mesh, "CG", 1)
-    Q = FunctionSpace(mesh, "CG", 1)
-    Vd = FunctionSpace(mesh, "RT", 1)
-    Vc = FunctionSpace(mesh, "N1curl", 1)
-    Vn = FunctionSpace(mesh, "DG", 0)
+    Vg = VectorFunctionSpace(mesh, "CG", 2)
+    Q = FunctionSpace(mesh, "CG", 2)
+    Vd = FunctionSpace(mesh, "RT", 2)
+    Vc = FunctionSpace(mesh, "N1curl", 2)
+    Vn = FunctionSpace(mesh, "DG", 1)
 
     #alpha = CellDiameter(mesh)
     alpha = Constant(0.1)
@@ -258,8 +258,11 @@ def run_simulation(dt, L):
                 f.write("dt,error_u,error_p,error_B\n")
             f.write(f"{float(dt)},{u_error},{P_error},{B_error}\n")
 
+if PETSc.COMM_WORLD.rank == 0:
+    if os.path.exists("all_errors.csv"):
+        os.remove("all_errors.csv")
 dt_values = [1/2, 1/4, 1/8]
-Ls = [2, 4, 8]
+Ls = [8, 8, 8]
 for dt, L in zip(dt_values, Ls):
     run_simulation(dt, L)
 
