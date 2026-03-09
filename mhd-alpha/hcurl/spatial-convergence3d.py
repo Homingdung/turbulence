@@ -43,7 +43,7 @@ errors_B = []
 rates_u = []
 rates_P = []
 rates_B = []
-T = 1.0
+T = 2.0
 L_values = [2, 4, 8]
 
 for L in L_values:
@@ -124,7 +124,7 @@ for L in L_values:
     phi = as_vector([sy - sz, sz - sx, sx - sy])
 
     lmbda = 1 + 3 * alpha**2 * pi**2
-    mu    = Constant(10)  
+    mu    = Constant(5)  
 
     u_ex     = pi * exp(-nu * t) * phi
     u_ex_t   = -nu * pi * exp(-nu * t) * phi          # du/dt
@@ -269,7 +269,7 @@ for i in range(len(L_values)):
     if i == 0:
         table_data.append([L_values[i], errors_u[i], "-", errors_P[i], "-", errors_B[i], "-"])
     else:
-        table_data.append([L_values[i], errors_u[i], rates_u[i-1], errors_P[i], rates_P[i-1], errors_B[i], rates_B[i-1]])
+        table_data.append([L_values[i], errors_u[i], f"{rates_u[i-1]:.2f}", errors_P[i], f"{rates_P[i-1]:.2f}", errors_B[i], f"{rates_B[i-1]:.2f}"])
 
 print("\nSpatial Convergence Results:")
 print(tabulate(table_data, headers=headers, floatfmt=".4e"))
