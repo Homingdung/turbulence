@@ -124,7 +124,7 @@ for L in L_values:
     phi = as_vector([sy - sz, sz - sx, sx - sy])
 
     lmbda = 1 + 3 * alpha**2 * pi**2
-    mu    = Constant(0.5)   # B 的衰减率，与 nu=1 不同
+    mu    = Constant(10)  
 
     u_ex     = pi * exp(-nu * t) * phi
     u_ex_t   = -nu * pi * exp(-nu * t) * phi          # du/dt
@@ -182,7 +182,7 @@ for L in L_values:
         + nu * inner(curl(u_avg), curl(ut)) * dx
         - S * inner(cross(j_avg, H_avg), ut) * dx
         # p
-        + inner(u, grad(Pt)) * dx
+        + inner(u_avg, grad(Pt)) * dx
         - inner(f1, ut) * dx
         # u_b
         + inner(u_b, u_bt) * dx
@@ -237,12 +237,14 @@ for L in L_values:
         z_prev.assign(z)
 
     t.assign(T)
-    
+    def remove_mean(p):
+        mean = assemble(p * dx) / assemble(1 * dx(mesh))
+        return p - Constant(mean)
     #t.assign(T - dt/2)
     #z_mean.assign(0.5 * (z + z_prev)) 
     u_error = norm(z.sub(0) - u_ex, "L2")
     B_error = norm(z.sub(4) - B_ex, "L2")
-    P_error = norm(z.sub(1) - P_ex, "L2")
+    P_error = norm(remove_mean(z.sub(1)) - P_ex, "L2")
     print(f"error_u:{u_error}")
     print(f"error_P:{P_error}")
     print(f"error_B:{B_error}")
