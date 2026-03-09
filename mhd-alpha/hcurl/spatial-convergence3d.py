@@ -123,19 +123,17 @@ for L in L_values:
 
     phi = as_vector([sy - sz, sz - sx, sx - sy])
 
-# 注意 div(phi) = 0，因为 phi = curl([s,s,s])
-
     lmbda = 1 + 3 * alpha**2 * pi**2
     mu    = Constant(0.5)   # B 的衰减率，与 nu=1 不同
 
-    u_ex     = pi * exp(-nu * t_half) * phi
-    u_ex_t   = -nu * pi * exp(-nu * t_half) * phi          # du/dt
+    u_ex     = pi * exp(-nu * t) * phi
+    u_ex_t   = -nu * pi * exp(-nu * t) * phi          # du/dt
 
-    u_b_ex   = pi * exp(-nu * t_half) / lmbda * phi        # (I - alpha^2 Delta)^{-1} u
-    u_b_ex_t = -nu * pi * exp(-nu * t_half) / lmbda * phi  # du_b/dt（仅供参考，不直接用）
+    u_b_ex   = pi * exp(-nu * t) / lmbda * phi        # (I - alpha^2 Delta)^{-1} u
+    u_b_ex_t = -nu * pi * exp(-nu * t) / lmbda * phi  # du_b/dt（仅供参考，不直接用）
 
-    B_ex     = pi * exp(-mu * t_half) * phi
-    B_ex_t   = -mu * pi * exp(-mu * t_half) * phi          # dB/dt
+    B_ex     = pi * exp(-mu * t) * phi
+    B_ex_t   = -mu * pi * exp(-mu * t) * phi          # dB/dt
 
     H_ex     = B_ex
     j_ex     = curl(B_ex)                             # = curl(pi * exp(-mu*t) * phi)
@@ -143,12 +141,21 @@ for L in L_values:
 
     E_ex     = (1/eta) * j_ex - cross(u_b_ex, H_ex)
     P_ex     = Constant(0)     
-    
-    # source term
-    f1 = u_ex_t - cross(u_b_ex, w_ex) + nu * curl(curl(u_ex)) - S * cross(j_ex, H_ex) 
-    f2 = B_ex_t + curl(E_ex)
-    f3 = E_ex + cross(u_b_ex, H_ex) - eta * j_ex
+    # the above are evaluated at t since for initial BC
+    # source term evaluate at t_half
+    u_h    = pi * exp(-nu * t_half) * phi
+    u_h_t    = -nu * pi * exp(-nu * t_half) * phi
+    u_b_h  = pi * exp(-nu * t_half) / lmbda * phi
+    B_h    = pi * exp(-mu * t_half) * phi
+    B_h_t    = -mu * pi * exp(-mu * t_half) * phi
+    w_h    = curl(u_h)
+    j_h    = curl(B_h)
+    E_h    = eta * j_h - cross(u_b_h, B_h)
 
+    f1 = u_h_t - cross(u_b_h, w_h) + nu * curl(curl(u_h)) - S*cross(j_h, B_h)
+    f2 = B_h_t + curl(E_h)
+    f3 = E_h + cross(u_b_h, B_h) - eta * j_h
+    
     z_prev.sub(0).interpolate(u_ex)
     z_prev.sub(1).interpolate(P_ex)
     z_prev.sub(2).interpolate(u_b_ex)
