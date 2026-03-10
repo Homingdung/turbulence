@@ -8,9 +8,9 @@ from mpi4py import MPI
 import matplotlib.pyplot as plt
 from mpi4py import MPI
 
-ic = "ozt" # tgv or abc, sp, ozt
-nu = Constant(0)
-eta = Constant(0)
+ic = "tgv" # tgv or abc, sp, ozt
+nu = Constant(1e-3)
+eta = Constant(1e-3)
 S = Constant(1)
 
 def helicity_c(u, B):
@@ -78,7 +78,7 @@ star = {
 sp = star
 
 # spatial parameters
-baseN = 4
+baseN = 12
 nref = 0
 
 dp={"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
@@ -98,8 +98,8 @@ Vn = FunctionSpace(mesh, "DG", 0)
 
 # time 
 t = Constant(0) 
-T = 1.0
-dt = Constant(0.001)
+T = 10.0
+dt = Constant(0.1)
 
 alpha = CellDiameter(mesh)
 def energy_uB(u_b, B):
